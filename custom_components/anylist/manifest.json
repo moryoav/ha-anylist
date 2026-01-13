@@ -1,0 +1,15 @@
+{
+  "domain": "anylist",
+  "name": "AnyList",
+  "codeowners": ["@ozonejunkieau"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/ozonejunkieau/ha-anylist",
+  "iot_class": "cloud_push",
+  "issue_tracker": "https://github.com/ozonejunkieau/ha-anylist/issues",
+  "requirements": [
+    "pyanylist @ git+https://github.com/ozonejunkieau/pyanylist.git",
+    "icalendar>=5.0.0"
+  ],
+  "version": "0.1.0"
+}

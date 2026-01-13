@@ -1,0 +1,40 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "AnyList Login",
+        "description": "Enter your AnyList credentials to connect your shopping lists.",
+        "data": {
+          "email": "Email",
+          "password": "Password"
+        }
+      },
+      "options": {
+        "title": "AnyList Options",
+        "description": "Configure additional features for your AnyList integration.",
+        "data": {
+          "meal_plan_calendar": "Enable Meal Plan Calendar"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid email or password",
+      "pyanylist_not_installed": "pyanylist library not installed",
+      "unknown": "Unexpected error"
+    },
+    "abort": {
+      "already_configured": "This AnyList account is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "AnyList Options",
+        "description": "Configure additional features for your AnyList integration.",
+        "data": {
+          "meal_plan_calendar": "Enable Meal Plan Calendar"
+        }
+      }
+    }
+  }
+}
