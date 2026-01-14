@@ -5,7 +5,7 @@ A Home Assistant custom integration for [AnyList](https://www.anylist.com/) shop
 ## Features
 
 - **Shopping Lists** as Todo entities - view, add, check off, and remove items
-- **Meal Plan Calendar** - view your AnyList meal plan in Home Assistant
+- **Meal Plan iCalendar URL** - exposes your AnyList meal plan URL for use with Home Assistant's iCal integration
 - **Real-time sync** - changes sync automatically via WebSocket
 
 ## Installation
@@ -37,9 +37,14 @@ Each AnyList shopping list appears as a todo entity. You can:
 - Check off items
 - Remove items
 
-### Calendar Entity
+### Meal Plan iCalendar URL Sensor
 
-Your AnyList meal plan calendar is available as a calendar entity, showing planned meals.
+If you enable the meal plan option during setup, a diagnostic sensor is created containing your AnyList iCalendar URL. You can use this URL with Home Assistant's built-in [iCal integration](https://www.home-assistant.io/integrations/ical/) to display your meal plan as a calendar:
+
+1. Go to Settings → Devices & Services → Add Integration
+2. Search for "iCal" and add it
+3. Copy the URL from the AnyList "Meal Plan iCalendar URL" sensor
+4. Paste it into the iCal integration setup
 
 ## Requirements
 

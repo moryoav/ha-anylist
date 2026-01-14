@@ -8,8 +8,7 @@
   "iot_class": "cloud_push",
   "issue_tracker": "https://github.com/ozonejunkieau/ha-anylist/issues",
   "requirements": [
-    "pyanylist>=0.0.1",
-    "icalendar>=5.0.0"
+    "pyanylist>=0.0.2"
   ],
   "version": "0.1.0"
 }

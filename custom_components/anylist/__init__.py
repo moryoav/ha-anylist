@@ -31,7 +31,7 @@ def get_platforms(entry: ConfigEntry) -> list[Platform]:
     """Get platforms to load based on config."""
     platforms = list(BASE_PLATFORMS)
     if entry.data.get(CONF_MEAL_PLAN_CALENDAR, False):
-        platforms.append(Platform.CALENDAR)
+        platforms.append(Platform.SENSOR)
     return platforms
 
 
