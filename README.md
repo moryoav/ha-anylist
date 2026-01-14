@@ -49,6 +49,10 @@ This integration requires the [pyanylist](https://github.com/ozonejunkieau/pyany
 - Linux (x86_64, aarch64)
 - macOS (Intel, Apple Silicon)
 
+## Acknowledgments
+
+This integration is built on top of the excellent [anylist_rs](https://github.com/phildenhoff/anylist_rs) Rust library by [@phildenhoff](https://github.com/phildenhoff), which provides the underlying AnyList API implementation.
+
 ## Disclaimer
 
 This is an unofficial integration and is not affiliated with or endorsed by AnyList. Use at your own risk and in accordance with AnyList's terms of service.
