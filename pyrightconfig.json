@@ -1,0 +1,12 @@
+{
+  "include": ["custom_components"],
+  "exclude": ["**/__pycache__"],
+  "typeCheckingMode": "standard",
+  "reportMissingTypeStubs": "warning",
+  "reportUnknownMemberType": "warning",
+  "reportUnknownVariableType": "warning",
+  "reportUnknownArgumentType": "warning",
+  "reportAny": "none",
+  "reportIncompatibleVariableOverride": "warning",
+  "pythonVersion": "3.12"
+}

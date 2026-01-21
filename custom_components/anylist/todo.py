@@ -14,7 +14,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DATA_CLIENT, DATA_COORDINATOR, DOMAIN
+from .const import CONF_SELECTED_LISTS, DATA_CLIENT, DATA_COORDINATOR, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -32,11 +32,17 @@ async def async_setup_entry(
     # Track which list IDs we've created entities for
     known_list_ids: set[str] = set()
 
+    # Get selected lists from config (empty list means all lists)
+    selected_lists = config_entry.data.get(CONF_SELECTED_LISTS, [])
+
     @callback
     def _async_add_new_lists() -> None:
         """Add entities for any new lists."""
         new_entities = []
         for shopping_list in coordinator.data.get("lists", []):
+            # Skip if not in selected lists (unless no selection means all)
+            if selected_lists and shopping_list.id not in selected_lists:
+                continue
             if shopping_list.id not in known_list_ids:
                 known_list_ids.add(shopping_list.id)
                 new_entities.append(
@@ -124,7 +130,7 @@ class AnyListTodoEntity(CoordinatorEntity, TodoListEntity):
         of creating a duplicate.
         """
         # Check for existing checked-off item with same name (case insensitive)
-        existing_item = self._find_checked_item_by_name(item.summary)
+        existing_item = self._find_checked_item_by_name(item.summary) if item.summary else None
 
         if existing_item:
             # Reuse existing item by unchecking it
@@ -160,6 +166,7 @@ class AnyListTodoEntity(CoordinatorEntity, TodoListEntity):
         for todo_item in self.todo_items:
             if (
                 todo_item.status == TodoItemStatus.COMPLETED
+                and todo_item.summary
                 and todo_item.summary.lower() == name_lower
             ):
                 return todo_item

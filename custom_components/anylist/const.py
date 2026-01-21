@@ -5,6 +5,7 @@ DOMAIN = "anylist"
 CONF_EMAIL = "email"
 CONF_PASSWORD = "password"
 CONF_MEAL_PLAN_CALENDAR = "meal_plan_calendar"
+CONF_SELECTED_LISTS = "selected_lists"
 
 # Data keys
 DATA_CLIENT = "client"

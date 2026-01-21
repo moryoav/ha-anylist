@@ -18,6 +18,7 @@ def test_const_values():
     assert const.CONF_EMAIL == "email"
     assert const.CONF_PASSWORD == "password"
     assert const.CONF_MEAL_PLAN_CALENDAR == "meal_plan_calendar"
+    assert const.CONF_SELECTED_LISTS == "selected_lists"
     assert const.DATA_ICALENDAR_URL == "icalendar_url"
 
 

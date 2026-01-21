@@ -9,11 +9,18 @@
           "password": "Password"
         }
       },
+      "select_lists": {
+        "title": "Select Lists",
+        "description": "Choose which shopping lists to enable in Home Assistant.",
+        "data": {
+          "selected_lists": "Shopping Lists"
+        }
+      },
       "options": {
         "title": "AnyList Options",
         "description": "Configure additional features for your AnyList integration.",
         "data": {
-          "meal_plan_calendar": "Enable Meal Plan Calendar"
+          "meal_plan_calendar": "Enable Meal Plan Calendar URL"
         }
       }
     },
@@ -30,9 +37,10 @@
     "step": {
       "init": {
         "title": "AnyList Options",
-        "description": "Configure additional features for your AnyList integration.",
+        "description": "Configure which lists and features are enabled.",
         "data": {
-          "meal_plan_calendar": "Enable Meal Plan Calendar"
+          "selected_lists": "Shopping Lists",
+          "meal_plan_calendar": "Enable Meal Plan Calendar URL"
         }
       }
     }
