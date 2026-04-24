@@ -1,14 +1,14 @@
 {
   "domain": "anylist",
   "name": "AnyList",
-  "codeowners": ["@ozonejunkieau"],
+  "codeowners": ["@moryoav"],
   "config_flow": true,
   "dependencies": [],
-  "documentation": "https://github.com/ozonejunkieau/ha-anylist",
+  "documentation": "https://github.com/moryoav/ha-anylist",
   "iot_class": "cloud_push",
-  "issue_tracker": "https://github.com/ozonejunkieau/ha-anylist/issues",
+  "issue_tracker": "https://github.com/moryoav/ha-anylist/issues",
   "requirements": [
     "pyanylist>=0.0.6"
   ],
-  "version": "0.1.1"
+  "version": "0.2.0"
 }
