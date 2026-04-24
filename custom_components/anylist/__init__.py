@@ -1,7 +1,9 @@
 """The AnyList integration."""
 from __future__ import annotations
 
+import asyncio
 import logging
+from contextlib import suppress
 from datetime import timedelta
 from typing import Any
 
@@ -41,8 +43,13 @@ from .const import (
     DATA_CLIENT,
     DATA_COORDINATOR,
     DATA_ICALENDAR_URL,
+    DATA_REALTIME_MANAGER,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    REALTIME_EVENT_POLL_INTERVAL,
+    REALTIME_RECONNECT_INITIAL_DELAY,
+    REALTIME_RECONNECT_MAX_DELAY,
+    REALTIME_REFRESH_DEBOUNCE,
     SERVICE_ADD_RECIPE_TO_LIST,
     SERVICE_CREATE_RECIPE,
     SERVICE_DELETE_RECIPE,
@@ -53,6 +60,14 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+_REALTIME_REFRESH_EVENT_NAMES = frozenset(
+    {
+        "ShoppingListsChanged",
+        "StarterListsChanged",
+        "RecipeDataChanged",
+    }
+)
 
 # Base platforms always loaded
 BASE_PLATFORMS: list[Platform] = [Platform.TODO]
@@ -373,6 +388,239 @@ async def _async_refresh_entry(hass: HomeAssistant, entry_id: str) -> dict[str, 
     coordinator = hass.data[DOMAIN][entry_id][DATA_COORDINATOR]
     await coordinator.async_request_refresh()
     return coordinator.data
+
+
+def _enum_name(value: Any) -> str:
+    """Return a stable enum/event name from pyanylist objects."""
+    if isinstance(value, str):
+        return value
+
+    name = getattr(value, "name", None)
+    if isinstance(name, str):
+        return name
+
+    text = str(value)
+    if "." in text:
+        return text.rsplit(".", maxsplit=1)[-1]
+    return text
+
+
+class _AnyListRealtimeManager:
+    """Manage AnyList realtime sync for a config entry."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry: ConfigEntry,
+        client: Any,
+        coordinator: DataUpdateCoordinator,
+    ) -> None:
+        """Initialize the realtime manager."""
+        self._hass = hass
+        self._entry_id = entry.entry_id
+        self._client = client
+        self._coordinator = coordinator
+        self._stop_event = asyncio.Event()
+        self._sync: Any | None = None
+        self._task: asyncio.Task[None] | None = None
+        self._refresh_task: asyncio.Task[None] | None = None
+        self._refresh_requested = False
+        self._last_state_name: str | None = None
+
+    def async_start(self) -> None:
+        """Start the realtime manager task."""
+        if self._task is not None:
+            return
+
+        self._task = asyncio.create_task(
+            self._async_run(),
+            name=f"anylist_realtime_{self._entry_id}",
+        )
+
+    async def async_stop(self) -> None:
+        """Stop realtime sync and cancel background work."""
+        self._stop_event.set()
+
+        if self._task is not None:
+            self._task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._task
+            self._task = None
+
+        if self._refresh_task is not None:
+            self._refresh_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._refresh_task
+            self._refresh_task = None
+
+        await self._async_disconnect_sync()
+        _LOGGER.debug(
+            "Stopped AnyList realtime sync manager for config entry %s",
+            self._entry_id,
+        )
+
+    async def _async_run(self) -> None:
+        """Run the realtime sync/reconnect loop."""
+        reconnect_delay = REALTIME_RECONNECT_INITIAL_DELAY
+
+        while not self._stop_event.is_set():
+            try:
+                _LOGGER.debug(
+                    "Starting AnyList realtime sync for config entry %s",
+                    self._entry_id,
+                )
+                self._sync = await self._hass.async_add_executor_job(
+                    self._client.start_realtime_sync
+                )
+                self._last_state_name = None
+                reconnect_delay = REALTIME_RECONNECT_INITIAL_DELAY
+                await self._async_poll_sync()
+            except asyncio.CancelledError:
+                raise
+            except Exception as err:
+                if self._stop_event.is_set():
+                    break
+                _LOGGER.warning(
+                    "AnyList realtime sync error for config entry %s: %s",
+                    self._entry_id,
+                    err,
+                )
+            finally:
+                await self._async_disconnect_sync()
+
+            if self._stop_event.is_set():
+                break
+
+            _LOGGER.info(
+                "Retrying AnyList realtime sync for config entry %s in %s seconds",
+                self._entry_id,
+                reconnect_delay,
+            )
+            if await self._async_wait_or_stop(reconnect_delay):
+                break
+
+            reconnect_delay = min(
+                reconnect_delay * 2,
+                REALTIME_RECONNECT_MAX_DELAY,
+            )
+
+    async def _async_poll_sync(self) -> None:
+        """Poll the pyanylist realtime event queue until disconnect."""
+        if self._sync is None:
+            raise RuntimeError("Realtime sync was not initialized")
+
+        while not self._stop_event.is_set():
+            sync = self._sync
+            if sync is None:
+                raise RuntimeError("Realtime sync was disconnected")
+
+            state_name = await self._hass.async_add_executor_job(
+                lambda: _enum_name(sync.state())
+            )
+            if state_name != self._last_state_name:
+                _LOGGER.debug(
+                    "AnyList realtime state for config entry %s: %s",
+                    self._entry_id,
+                    state_name,
+                )
+                self._last_state_name = state_name
+
+            if state_name in {"Disconnected", "Closed"}:
+                raise RuntimeError(f"Realtime sync entered state {state_name}")
+
+            events = await self._hass.async_add_executor_job(sync.poll_events)
+            if events:
+                self._async_handle_events(events)
+
+            if await self._async_wait_or_stop(REALTIME_EVENT_POLL_INTERVAL):
+                break
+
+    def _async_handle_events(self, events: list[Any]) -> None:
+        """Handle a batch of pyanylist realtime events."""
+        event_names = {_enum_name(event) for event in events}
+        _LOGGER.debug(
+            "AnyList realtime events for config entry %s: %s",
+            self._entry_id,
+            ", ".join(sorted(event_names)),
+        )
+
+        refresh_events = sorted(event_names & _REALTIME_REFRESH_EVENT_NAMES)
+        if refresh_events:
+            self._async_schedule_refresh(
+                f"realtime event(s): {', '.join(refresh_events)}"
+            )
+
+    def _async_schedule_refresh(self, reason: str) -> None:
+        """Debounce and coalesce coordinator refresh requests."""
+        if self._stop_event.is_set():
+            return
+
+        self._refresh_requested = True
+
+        if self._refresh_task is None or self._refresh_task.done():
+            self._refresh_task = asyncio.create_task(
+                self._async_run_refresh_loop(reason),
+                name=f"anylist_refresh_{self._entry_id}",
+            )
+            return
+
+        _LOGGER.debug(
+            "Coalescing AnyList realtime refresh for config entry %s (%s)",
+            self._entry_id,
+            reason,
+        )
+
+    async def _async_run_refresh_loop(self, reason: str) -> None:
+        """Run debounced refreshes without overlapping coordinator requests."""
+        current_reason = reason
+
+        try:
+            while self._refresh_requested and not self._stop_event.is_set():
+                await asyncio.sleep(REALTIME_REFRESH_DEBOUNCE)
+                self._refresh_requested = False
+                await self._async_request_refresh(current_reason)
+                current_reason = "coalesced realtime events"
+        except asyncio.CancelledError:
+            raise
+        finally:
+            self._refresh_task = None
+            if self._refresh_requested and not self._stop_event.is_set():
+                self._async_schedule_refresh("coalesced realtime events")
+
+    async def _async_request_refresh(self, reason: str) -> None:
+        """Request a coordinator refresh and swallow transient failures."""
+        _LOGGER.debug(
+            "Requesting AnyList coordinator refresh for config entry %s (%s)",
+            self._entry_id,
+            reason,
+        )
+        try:
+            await self._coordinator.async_request_refresh()
+        except Exception as err:
+            _LOGGER.warning(
+                "Failed to refresh AnyList data for config entry %s after %s: %s",
+                self._entry_id,
+                reason,
+                err,
+            )
+
+    async def _async_disconnect_sync(self) -> None:
+        """Disconnect the current realtime sync object."""
+        if self._sync is None:
+            return
+
+        sync = self._sync
+        self._sync = None
+        with suppress(Exception):
+            await self._hass.async_add_executor_job(sync.disconnect)
+
+    async def _async_wait_or_stop(self, delay: float) -> bool:
+        """Wait for either stop or the requested delay."""
+        try:
+            await asyncio.wait_for(self._stop_event.wait(), timeout=delay)
+        except asyncio.TimeoutError:
+            return False
+        return True
 
 
 def _async_register_services(hass: HomeAssistant) -> None:
@@ -736,17 +984,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
 
     await coordinator.async_config_entry_first_refresh()
+    realtime_manager = _AnyListRealtimeManager(hass, entry, client, coordinator)
 
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = {
         DATA_CLIENT: client,
         DATA_COORDINATOR: coordinator,
         DATA_ICALENDAR_URL: icalendar_url,
+        DATA_REALTIME_MANAGER: realtime_manager,
     }
 
     platforms = get_platforms(entry)
     await hass.config_entries.async_forward_entry_setups(entry, platforms)
     _async_register_services(hass)
+    realtime_manager.async_start()
 
     return True
 
@@ -755,7 +1006,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     platforms = get_platforms(entry)
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, platforms):
-        hass.data[DOMAIN].pop(entry.entry_id)
+        entry_data = hass.data[DOMAIN].pop(entry.entry_id)
+        realtime_manager = entry_data.get(DATA_REALTIME_MANAGER)
+        if realtime_manager is not None:
+            await realtime_manager.async_stop()
         if not hass.data[DOMAIN]:
             _async_unregister_services(hass)
 
