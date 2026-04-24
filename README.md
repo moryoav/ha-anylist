@@ -6,6 +6,7 @@ A Home Assistant custom integration for [AnyList](https://www.anylist.com/) shop
 
 - **Shopping Lists** as Todo entities - view, add, check off, and remove items
 - **Meal Plan iCalendar URL** - exposes your AnyList meal plan URL for use with Home Assistant's iCal integration
+- **Recipe services** - search recipes, fetch one recipe, create/update/delete recipes, and add recipe ingredients to shopping lists from automations or Node-RED
 - **Real-time sync** - changes sync automatically via WebSocket
 
 ## Installation
@@ -45,6 +46,17 @@ If you enable the meal plan option during setup, a diagnostic sensor is created 
 2. Search for "iCal" and add it
 3. Copy the URL from the AnyList "Meal Plan iCalendar URL" sensor
 4. Paste it into the iCal integration setup
+
+## Service Actions
+
+Recipe support is currently exposed through AnyList service actions for automations, scripts, and Node-RED flows:
+
+- `anylist.get_recipes`
+- `anylist.get_recipe`
+- `anylist.add_recipe_to_list`
+- `anylist.create_recipe`
+- `anylist.update_recipe`
+- `anylist.delete_recipe`
 
 ## Requirements
 

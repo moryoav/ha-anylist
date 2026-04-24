@@ -1,0 +1,232 @@
+refresh:
+  name: Refresh
+  description: Refresh lists, favourites, and recipes for a loaded AnyList account.
+  fields:
+    config_entry_id:
+      name: Config entry ID
+      description: Specific AnyList config entry to refresh when multiple AnyList accounts are configured.
+      advanced: true
+      example: "01HABCDEF1234567890"
+      selector:
+        text:
+
+get_recipes:
+  name: Get recipes
+  description: Return AnyList recipes for use in automations and Node-RED.
+  fields:
+    config_entry_id:
+      name: Config entry ID
+      description: Specific AnyList config entry to query when multiple AnyList accounts are configured.
+      advanced: true
+      example: "01HABCDEF1234567890"
+      selector:
+        text:
+    query:
+      name: Query
+      description: Case-insensitive substring filter applied to recipe names.
+      example: "pasta"
+      selector:
+        text:
+    include_ingredients:
+      name: Include ingredients
+      description: Include ingredients in each returned recipe.
+      default: true
+      selector:
+        boolean:
+    include_steps:
+      name: Include preparation steps
+      description: Include preparation steps in each returned recipe.
+      default: false
+      selector:
+        boolean:
+
+get_recipe:
+  name: Get recipe
+  description: Return a single AnyList recipe by ID or exact name.
+  fields:
+    config_entry_id:
+      name: Config entry ID
+      description: Specific AnyList config entry to query when multiple AnyList accounts are configured.
+      advanced: true
+      example: "01HABCDEF1234567890"
+      selector:
+        text:
+    recipe_id:
+      name: Recipe ID
+      description: Unique AnyList recipe ID. Provide either this or name.
+      example: "recipe_123"
+      selector:
+        text:
+    name:
+      name: Name
+      description: Exact AnyList recipe name. Provide either this or recipe_id.
+      example: "Weeknight Pasta"
+      selector:
+        text:
+    include_ingredients:
+      name: Include ingredients
+      description: Include ingredients in the returned recipe.
+      default: true
+      selector:
+        boolean:
+    include_steps:
+      name: Include preparation steps
+      description: Include preparation steps in the returned recipe.
+      default: true
+      selector:
+        boolean:
+
+add_recipe_to_list:
+  name: Add recipe to list
+  description: Add an AnyList recipe's ingredients to a shopping list.
+  fields:
+    config_entry_id:
+      name: Config entry ID
+      description: Specific AnyList config entry to use when multiple AnyList accounts are configured.
+      advanced: true
+      example: "01HABCDEF1234567890"
+      selector:
+        text:
+    recipe_id:
+      name: Recipe ID
+      description: Unique AnyList recipe ID. Provide either this or recipe_name.
+      example: "recipe_123"
+      selector:
+        text:
+    recipe_name:
+      name: Recipe name
+      description: Exact AnyList recipe name. Provide either this or recipe_id.
+      example: "Weeknight Pasta"
+      selector:
+        text:
+    list_id:
+      name: List ID
+      description: AnyList shopping list ID. Provide either this or list_name.
+      example: "list_123"
+      selector:
+        text:
+    list_name:
+      name: List name
+      description: Exact AnyList shopping list name. Provide either this or list_id.
+      example: "Groceries"
+      selector:
+        text:
+    scale_factor:
+      name: Scale factor
+      description: Optional multiplier to scale ingredient quantities when adding the recipe to the shopping list.
+      example: 2
+      selector:
+        number:
+          min: 0
+          step: 0.1
+          mode: box
+
+create_recipe:
+  name: Create recipe
+  description: Create a new AnyList recipe.
+  fields:
+    config_entry_id:
+      name: Config entry ID
+      description: Specific AnyList config entry to use when multiple AnyList accounts are configured.
+      advanced: true
+      example: "01HABCDEF1234567890"
+      selector:
+        text:
+    name:
+      name: Name
+      description: Name of the recipe to create.
+      required: true
+      example: "No-Knead Pizza Dough"
+      selector:
+        text:
+    ingredients:
+      name: Ingredients
+      description: List of ingredient objects with a required name and optional quantity, note, and raw_ingredient fields.
+      required: true
+      example:
+        - name: Flour
+          quantity: 500 g
+        - name: Water
+          quantity: 350 ml
+        - name: Salt
+          quantity: 10 g
+    preparation_steps:
+      name: Preparation steps
+      description: Ordered list of preparation step strings.
+      required: true
+      example:
+        - Mix the ingredients.
+        - Rest the dough overnight.
+        - Bake at 250 C.
+
+update_recipe:
+  name: Update recipe
+  description: Replace an existing AnyList recipe by ID or exact current recipe name.
+  fields:
+    config_entry_id:
+      name: Config entry ID
+      description: Specific AnyList config entry to use when multiple AnyList accounts are configured.
+      advanced: true
+      example: "01HABCDEF1234567890"
+      selector:
+        text:
+    recipe_id:
+      name: Recipe ID
+      description: Unique AnyList recipe ID. Provide either this or recipe_name.
+      example: "recipe_123"
+      selector:
+        text:
+    recipe_name:
+      name: Current recipe name
+      description: Exact current AnyList recipe name. Provide either this or recipe_id.
+      example: "No-Knead Pizza Dough"
+      selector:
+        text:
+    name:
+      name: New name
+      description: Replacement recipe name.
+      required: true
+      example: "Same-Day Pizza Dough"
+      selector:
+        text:
+    ingredients:
+      name: Ingredients
+      description: Complete replacement ingredient list.
+      required: true
+      example:
+        - name: Flour
+          quantity: 500 g
+        - name: Water
+          quantity: 325 ml
+    preparation_steps:
+      name: Preparation steps
+      description: Complete replacement preparation steps.
+      required: true
+      example:
+        - Mix all ingredients.
+        - Knead until smooth.
+        - Rest for 2 hours.
+
+delete_recipe:
+  name: Delete recipe
+  description: Delete an AnyList recipe by ID or exact name.
+  fields:
+    config_entry_id:
+      name: Config entry ID
+      description: Specific AnyList config entry to use when multiple AnyList accounts are configured.
+      advanced: true
+      example: "01HABCDEF1234567890"
+      selector:
+        text:
+    recipe_id:
+      name: Recipe ID
+      description: Unique AnyList recipe ID. Provide either this or name.
+      example: "recipe_123"
+      selector:
+        text:
+    name:
+      name: Name
+      description: Exact AnyList recipe name. Provide either this or recipe_id.
+      example: "No-Knead Pizza Dough"
+      selector:
+        text:

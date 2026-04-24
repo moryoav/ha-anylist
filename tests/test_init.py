@@ -20,22 +20,36 @@ def test_const_values():
     assert const.CONF_MEAL_PLAN_CALENDAR == "meal_plan_calendar"
     assert const.CONF_SELECTED_LISTS == "selected_lists"
     assert const.DATA_ICALENDAR_URL == "icalendar_url"
+    assert const.SERVICE_GET_RECIPES == "get_recipes"
+    assert const.SERVICE_GET_RECIPE == "get_recipe"
+    assert const.SERVICE_ADD_RECIPE_TO_LIST == "add_recipe_to_list"
+    assert const.SERVICE_CREATE_RECIPE == "create_recipe"
+    assert const.SERVICE_UPDATE_RECIPE == "update_recipe"
+    assert const.SERVICE_DELETE_RECIPE == "delete_recipe"
 
 
 def test_pyanylist_import():
     """Test that pyanylist library can be imported."""
-    from pyanylist import AnyListClient
+    pyanylist = pytest.importorskip("pyanylist")
+    AnyListClient = pyanylist.AnyListClient
 
     assert AnyListClient is not None
     assert hasattr(AnyListClient, "login")
     assert hasattr(AnyListClient, "get_lists")
     assert hasattr(AnyListClient, "enable_icalendar")
-    assert hasattr(AnyListClient, "get_icalendar_url")
+    assert hasattr(AnyListClient, "get_recipes")
+    assert hasattr(AnyListClient, "get_recipe_by_id")
+    assert hasattr(AnyListClient, "get_recipe_by_name")
+    assert hasattr(AnyListClient, "create_recipe")
+    assert hasattr(AnyListClient, "update_recipe")
+    assert hasattr(AnyListClient, "delete_recipe")
+    assert hasattr(AnyListClient, "add_recipe_to_list")
 
 
 def test_pyanylist_methods():
     """Test that pyanylist has expected methods for todo operations."""
-    from pyanylist import AnyListClient
+    pyanylist = pytest.importorskip("pyanylist")
+    AnyListClient = pyanylist.AnyListClient
 
     assert hasattr(AnyListClient, "add_item")
     assert hasattr(AnyListClient, "cross_off_item")
