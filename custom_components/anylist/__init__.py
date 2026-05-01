@@ -4,7 +4,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextlib import suppress
-from datetime import timedelta
 from typing import Any
 
 import voluptuous as vol
@@ -44,7 +43,6 @@ from .const import (
     DATA_COORDINATOR,
     DATA_ICALENDAR_URL,
     DATA_REALTIME_MANAGER,
-    DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     REALTIME_EVENT_POLL_INTERVAL,
     REALTIME_RECONNECT_INITIAL_DELAY,
@@ -65,7 +63,6 @@ _REALTIME_REFRESH_EVENT_NAMES = frozenset(
     {
         "ShoppingListsChanged",
         "StarterListsChanged",
-        "RecipeDataChanged",
     }
 )
 
@@ -372,14 +369,12 @@ async def _async_fetch_data(hass: HomeAssistant, client: Any) -> dict[str, Any]:
     try:
         lists = await hass.async_add_executor_job(client.get_lists)
         favourites = await hass.async_add_executor_job(client.get_favourites)
-        recipes = await hass.async_add_executor_job(client.get_recipes)
     except Exception as err:
         raise UpdateFailed(f"Error fetching AnyList data: {err}") from err
 
     return {
         "lists": lists,
         "favourites": favourites,
-        "recipes": recipes,
     }
 
 
@@ -754,7 +749,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
     async def async_handle_create_recipe(call: ServiceCall) -> ServiceResponse | None:
         """Create an AnyList recipe."""
-        entry_id, entry_data = _get_entry_runtime_data(
+        _, entry_data = _get_entry_runtime_data(
             hass,
             call.data.get(ATTR_CONFIG_ENTRY_ID),
         )
@@ -776,8 +771,6 @@ def _async_register_services(hass: HomeAssistant) -> None:
                 f"Failed to create AnyList recipe '{call.data[ATTR_NAME]}': {err}"
             ) from err
 
-        await _async_refresh_entry(hass, entry_id)
-
         if not call.return_response:
             return None
 
@@ -791,7 +784,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
     async def async_handle_update_recipe(call: ServiceCall) -> ServiceResponse | None:
         """Update an AnyList recipe."""
-        entry_id, entry_data = _get_entry_runtime_data(
+        _, entry_data = _get_entry_runtime_data(
             hass,
             call.data.get(ATTR_CONFIG_ENTRY_ID),
         )
@@ -825,8 +818,6 @@ def _async_register_services(hass: HomeAssistant) -> None:
                 f"'{getattr(recipe, ATTR_NAME, recipe.id)}': {err}"
             ) from err
 
-        await _async_refresh_entry(hass, entry_id)
-
         if not call.return_response:
             return None
 
@@ -847,7 +838,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
     async def async_handle_delete_recipe(call: ServiceCall) -> ServiceResponse | None:
         """Delete an AnyList recipe."""
-        entry_id, entry_data = _get_entry_runtime_data(
+        _, entry_data = _get_entry_runtime_data(
             hass,
             call.data.get(ATTR_CONFIG_ENTRY_ID),
         )
@@ -872,8 +863,6 @@ def _async_register_services(hass: HomeAssistant) -> None:
                 f"Failed to delete AnyList recipe "
                 f"'{getattr(recipe, ATTR_NAME, recipe.id)}': {err}"
             ) from err
-
-        await _async_refresh_entry(hass, entry_id)
 
         if not call.return_response:
             return None
@@ -980,7 +969,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER,
         name=DOMAIN,
         update_method=async_update_data,
-        update_interval=timedelta(seconds=DEFAULT_SCAN_INTERVAL),
+        update_interval=None,
     )
 
     await coordinator.async_config_entry_first_refresh()

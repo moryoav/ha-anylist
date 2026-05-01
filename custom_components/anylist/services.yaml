@@ -1,6 +1,6 @@
 refresh:
   name: Refresh
-  description: Refresh lists, favourites, and recipes for a loaded AnyList account.
+  description: Refresh lists and favourites for a loaded AnyList account.
   fields:
     config_entry_id:
       name: Config entry ID

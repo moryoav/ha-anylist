@@ -14,7 +14,6 @@ DATA_ICALENDAR_URL = "icalendar_url"
 DATA_REALTIME_MANAGER = "realtime_manager"
 
 # Update intervals
-DEFAULT_SCAN_INTERVAL = 30  # seconds
 REALTIME_EVENT_POLL_INTERVAL = 1  # seconds
 REALTIME_REFRESH_DEBOUNCE = 1  # seconds
 REALTIME_RECONNECT_INITIAL_DELAY = 5  # seconds
