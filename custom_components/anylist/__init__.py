@@ -61,8 +61,19 @@ _LOGGER = logging.getLogger(__name__)
 
 _REALTIME_REFRESH_EVENT_NAMES = frozenset(
     {
+        # Shopping list contents
         "ShoppingListsChanged",
+        "CategorizedItemsChanged",
+
+        # Shopping list metadata / organization
+        "ListSettingsChanged",
+        "ListFoldersChanged",
+        "UserCategoriesChanged",
+
+        # Favourites / starter lists
         "StarterListsChanged",
+        "StarterListOrderChanged",
+        "StarterListSettingsChanged",
     }
 )
 
@@ -540,7 +551,22 @@ class _AnyListRealtimeManager:
         )
 
         refresh_events = sorted(event_names & _REALTIME_REFRESH_EVENT_NAMES)
+        ignored_events = sorted(event_names - _REALTIME_REFRESH_EVENT_NAMES)
+
+        if ignored_events:
+            _LOGGER.warning(
+                "AnyList realtime event(s) received but not mapped to refresh for "
+                "config entry %s: %s",
+                self._entry_id,
+                ", ".join(ignored_events),
+            )
+
         if refresh_events:
+            _LOGGER.info(
+                "AnyList realtime event(s) triggering refresh for config entry %s: %s",
+                self._entry_id,
+                ", ".join(refresh_events),
+            )
             self._async_schedule_refresh(
                 f"realtime event(s): {', '.join(refresh_events)}"
             )
