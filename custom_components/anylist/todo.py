@@ -11,10 +11,18 @@ from homeassistant.components.todo import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_SELECTED_LISTS, DATA_CLIENT, DATA_COORDINATOR, DOMAIN
+from .client import async_call_with_timeout
+from .const import (
+    ANYLIST_REQUEST_TIMEOUT,
+    CONF_SELECTED_LISTS,
+    DATA_CLIENT,
+    DATA_COORDINATOR,
+    DOMAIN,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -138,13 +146,15 @@ class AnyListTodoEntity(CoordinatorEntity, TodoListEntity):
                 "Reusing existing checked item '%s' instead of creating duplicate",
                 item.summary
             )
-            await self.hass.async_add_executor_job(
+            await self._async_call_client(
+                "uncheck reused todo item",
                 self._client.uncheck_item,
                 self._list_id,
                 existing_item.uid,
             )
         elif item.description:
-            await self.hass.async_add_executor_job(
+            await self._async_call_client(
+                "create todo item with details",
                 self._client.add_item_with_details,
                 self._list_id,
                 item.summary,
@@ -153,7 +163,8 @@ class AnyListTodoEntity(CoordinatorEntity, TodoListEntity):
                 None,  # category
             )
         else:
-            await self.hass.async_add_executor_job(
+            await self._async_call_client(
+                "create todo item",
                 self._client.add_item,
                 self._list_id,
                 item.summary,
@@ -175,13 +186,15 @@ class AnyListTodoEntity(CoordinatorEntity, TodoListEntity):
     async def async_update_todo_item(self, item: TodoItem) -> None:
         """Update an item on the list."""
         if item.status == TodoItemStatus.COMPLETED:
-            await self.hass.async_add_executor_job(
+            await self._async_call_client(
+                "complete todo item",
                 self._client.cross_off_item,
                 self._list_id,
                 item.uid,
             )
         else:
-            await self.hass.async_add_executor_job(
+            await self._async_call_client(
+                "uncheck todo item",
                 self._client.uncheck_item,
                 self._list_id,
                 item.uid,
@@ -190,13 +203,30 @@ class AnyListTodoEntity(CoordinatorEntity, TodoListEntity):
 
     async def async_delete_todo_items(self, uids: list[str]) -> None:
         """Delete items from the list."""
-        for uid in uids:
-            await self.hass.async_add_executor_job(
-                self._client.delete_item,
-                self._list_id,
-                uid,
-            )
+        await self._async_call_client(
+            "delete todo items",
+            self._client.bulk_delete_items,
+            self._list_id,
+            uids,
+        )
         await self.coordinator.async_request_refresh()
+
+    async def _async_call_client(self, action: str, func, *args) -> None:
+        """Run a todo mutation with logging and timeout protection."""
+        _LOGGER.debug("AnyList todo mutation started: %s", action)
+        try:
+            await async_call_with_timeout(
+                self.hass,
+                func,
+                *args,
+                timeout=ANYLIST_REQUEST_TIMEOUT,
+            )
+        except Exception as err:
+            _LOGGER.warning("AnyList todo mutation failed: %s: %s", action, err)
+            raise HomeAssistantError(
+                f"AnyList todo mutation failed: {action}: {err}"
+            ) from err
+        _LOGGER.debug("AnyList todo mutation succeeded: %s", action)
 
     @callback
     def _handle_coordinator_update(self) -> None:

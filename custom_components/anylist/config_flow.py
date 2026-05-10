@@ -16,7 +16,14 @@ from homeassistant.helpers.selector import (
     SelectSelectorMode,
 )
 
-from .const import CONF_MEAL_PLAN_CALENDAR, CONF_SELECTED_LISTS, DOMAIN
+from .client import AnyListClient, async_call_with_timeout
+from .const import (
+    ANYLIST_LOGIN_TIMEOUT,
+    ANYLIST_REQUEST_TIMEOUT,
+    CONF_MEAL_PLAN_CALENDAR,
+    CONF_SELECTED_LISTS,
+    DOMAIN,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -47,27 +54,25 @@ class AnyListConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            try:
-                from pyanylist import AnyListClient
-            except ImportError:
-                errors["base"] = "pyanylist_not_installed"
-                return self.async_show_form(
-                    step_id="user",
-                    data_schema=STEP_USER_DATA_SCHEMA,
-                    errors=errors,
-                )
-
             email = user_input[CONF_EMAIL]
             password = user_input[CONF_PASSWORD]
 
             try:
                 # Test the credentials
-                client = await self.hass.async_add_executor_job(
-                    AnyListClient.login, email, password
+                client = await async_call_with_timeout(
+                    self.hass,
+                    AnyListClient.login,
+                    email,
+                    password,
+                    timeout=ANYLIST_LOGIN_TIMEOUT,
                 )
                 user_id = client.user_id()
                 # Fetch available lists
-                lists = await self.hass.async_add_executor_job(client.get_lists)
+                lists = await async_call_with_timeout(
+                    self.hass,
+                    client.get_lists,
+                    timeout=ANYLIST_REQUEST_TIMEOUT,
+                )
                 self._available_lists = [(lst.id, lst.name) for lst in lists]
             except Exception as err:
                 _LOGGER.exception("Failed to authenticate: %s", err)
@@ -174,7 +179,11 @@ class AnyListOptionsFlowHandler(config_entries.OptionsFlow):
             client = self.hass.data[DOMAIN][self.config_entry.entry_id].get(DATA_CLIENT)
             if client:
                 try:
-                    lists = await self.hass.async_add_executor_job(client.get_lists)
+                    lists = await async_call_with_timeout(
+                        self.hass,
+                        client.get_lists,
+                        timeout=ANYLIST_REQUEST_TIMEOUT,
+                    )
                     self._available_lists = [(lst.id, lst.name) for lst in lists]
                 except Exception as err:
                     _LOGGER.warning("Failed to fetch lists: %s", err)

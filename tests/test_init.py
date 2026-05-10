@@ -1,11 +1,10 @@
 """Tests for AnyList integration initialization."""
-import pytest
+import importlib.util
+import sys
 
 
 def test_const_values():
     """Test that constants have expected values."""
-    import importlib.util
-
     # Load const.py directly to avoid homeassistant dependency
     spec = importlib.util.spec_from_file_location(
         "const", "custom_components/anylist/const.py"
@@ -26,14 +25,29 @@ def test_const_values():
     assert const.SERVICE_CREATE_RECIPE == "create_recipe"
     assert const.SERVICE_UPDATE_RECIPE == "update_recipe"
     assert const.SERVICE_DELETE_RECIPE == "delete_recipe"
+    assert const.ANYLIST_REQUEST_TIMEOUT == 15
+    assert const.ANYLIST_LOGIN_TIMEOUT == 20
+    assert const.ANYLIST_REFRESH_TIMEOUT == 30
+    assert const.ANYLIST_POLL_INTERVAL == 60
     assert const.REALTIME_EVENT_POLL_INTERVAL == 1
     assert const.REALTIME_REFRESH_DEBOUNCE == 1
 
 
-def test_pyanylist_import():
-    """Test that pyanylist library can be imported."""
-    pyanylist = pytest.importorskip("pyanylist")
-    AnyListClient = pyanylist.AnyListClient
+def _load_client_module():
+    """Load client.py directly to avoid homeassistant dependency."""
+    spec = importlib.util.spec_from_file_location(
+        "client", "custom_components/anylist/client.py"
+    )
+    client = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = client
+    spec.loader.exec_module(client)
+    return client
+
+
+def test_local_client_import():
+    """Test that the local AnyList client exposes expected methods."""
+    client = _load_client_module()
+    AnyListClient = client.AnyListClient
 
     assert AnyListClient is not None
     assert hasattr(AnyListClient, "login")
@@ -47,14 +61,54 @@ def test_pyanylist_import():
     assert hasattr(AnyListClient, "delete_recipe")
     assert hasattr(AnyListClient, "add_recipe_to_list")
     assert hasattr(AnyListClient, "start_realtime_sync")
+    assert client.Ingredient is not None
+    assert client.Recipe is not None
 
 
-def test_pyanylist_methods():
-    """Test that pyanylist has expected methods for todo operations."""
-    pyanylist = pytest.importorskip("pyanylist")
-    AnyListClient = pyanylist.AnyListClient
+def test_local_client_todo_methods():
+    """Test that the local client has expected methods for todo operations."""
+    client = _load_client_module()
+    AnyListClient = client.AnyListClient
 
     assert hasattr(AnyListClient, "add_item")
+    assert hasattr(AnyListClient, "add_item_with_details")
     assert hasattr(AnyListClient, "cross_off_item")
     assert hasattr(AnyListClient, "uncheck_item")
     assert hasattr(AnyListClient, "delete_item")
+    assert hasattr(AnyListClient, "bulk_delete_items")
+
+
+def test_local_client_parses_shopping_list_response():
+    """Test the local protobuf subset parses shopping lists."""
+    client_module = _load_client_module()
+    item = client_module._pb_list_item(
+        item_id="item1",
+        list_id="list1",
+        name="Milk",
+        user_id="user1",
+        checked=False,
+        quantity="2",
+        details="skim",
+    )
+    shopping_list = (
+        client_module._field_string(1, "list1")
+        + client_module._field_string(3, "Groceries")
+        + client_module._field_message(4, item)
+    )
+    response = client_module._field_message(1, shopping_list)
+    user_data = client_module._field_message(1, response)
+    client = client_module.AnyListClient(
+        access_token="access",
+        refresh_token="refresh",
+        user_id="user1",
+        is_premium_user=False,
+        client_identifier="client1",
+    )
+    client.get_user_data = lambda: user_data
+
+    lists = client.get_lists()
+
+    assert lists[0].id == "list1"
+    assert lists[0].name == "Groceries"
+    assert lists[0].items[0].name == "Milk"
+    assert lists[0].items[0].quantity == "2"

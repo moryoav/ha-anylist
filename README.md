@@ -7,7 +7,7 @@ A Home Assistant custom integration for [AnyList](https://www.anylist.com/) shop
 - **Shopping Lists** as Todo entities - view, add, check off, and remove items
 - **Meal Plan iCalendar URL** - exposes your AnyList meal plan URL for use with Home Assistant's iCal integration
 - **Recipe services** - search recipes, fetch one recipe, create/update/delete recipes, and add recipe ingredients to shopping lists from automations or Node-RED
-- **Real-time sync** - changes sync automatically via WebSocket
+- **Polling sync fallback** - changes from AnyList are refreshed on a safe polling interval
 
 ## Installation
 
@@ -60,15 +60,14 @@ Recipe support is currently exposed through AnyList service actions for automati
 
 ## Requirements
 
-This integration requires the [pyanylist](https://github.com/ozonejunkieau/pyanylist) library, which is installed automatically.
-
-**Note:** The pyanylist library is a Rust extension. Pre-built wheels are available for:
-- Linux (x86_64, aarch64)
-- macOS (Intel, Apple Silicon)
+This integration includes a local pure-Python AnyList client. No external AnyList
+client package or Rust extension is required.
 
 ## Acknowledgments
 
-This integration is built on top of the excellent [anylist_rs](https://github.com/phildenhoff/anylist_rs) Rust library by [@phildenhoff](https://github.com/phildenhoff), which provides the underlying AnyList API implementation.
+The local client follows the protobuf-over-multipart AnyList API shape documented
+by the excellent [anylist_rs](https://github.com/phildenhoff/anylist_rs) project
+by [@phildenhoff](https://github.com/phildenhoff).
 
 ## Disclaimer
 

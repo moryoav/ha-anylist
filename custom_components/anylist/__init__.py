@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import timedelta
 import logging
 from contextlib import suppress
 from typing import Any
@@ -20,7 +21,17 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
+from .client import (
+    AnyListClient,
+    AnyListTimeoutError,
+    Ingredient,
+    async_call_with_timeout,
+)
 from .const import (
+    ANYLIST_LOGIN_TIMEOUT,
+    ANYLIST_POLL_INTERVAL,
+    ANYLIST_REFRESH_TIMEOUT,
+    ANYLIST_REQUEST_TIMEOUT,
     ATTR_CONFIG_ENTRY_ID,
     ATTR_INGREDIENTS,
     ATTR_INCLUDE_INGREDIENTS,
@@ -241,9 +252,7 @@ def _serialize_recipe(
 
 
 def _build_ingredients(ingredients_data: list[dict[str, Any]]) -> list[Any]:
-    """Build pyanylist Ingredient objects from service data."""
-    from pyanylist import Ingredient
-
+    """Build AnyList Ingredient objects from service data."""
     return [
         Ingredient(
             name=ingredient_data[ATTR_NAME],
@@ -323,14 +332,18 @@ async def _async_resolve_recipe(
 
     try:
         if _value_is_set(recipe_id):
-            recipe = await hass.async_add_executor_job(
+            recipe = await async_call_with_timeout(
+                hass,
                 client.get_recipe_by_id,
                 recipe_id,
+                timeout=ANYLIST_REQUEST_TIMEOUT,
             )
         else:
-            recipe = await hass.async_add_executor_job(
+            recipe = await async_call_with_timeout(
+                hass,
                 client.get_recipe_by_name,
                 recipe_name,
+                timeout=ANYLIST_REQUEST_TIMEOUT,
             )
     except Exception as err:
         raise HomeAssistantError(
@@ -359,7 +372,11 @@ async def _async_resolve_list(
     )
 
     try:
-        lists = await hass.async_add_executor_job(client.get_lists)
+        lists = await async_call_with_timeout(
+            hass,
+            client.get_lists,
+            timeout=ANYLIST_REQUEST_TIMEOUT,
+        )
     except Exception as err:
         raise HomeAssistantError(
             f"Failed to load AnyList shopping lists: {err}"
@@ -377,12 +394,54 @@ async def _async_resolve_list(
 
 async def _async_fetch_data(hass: HomeAssistant, client: Any) -> dict[str, Any]:
     """Fetch AnyList data for the coordinator."""
+    _LOGGER.debug("Starting AnyList data fetch")
     try:
-        lists = await hass.async_add_executor_job(client.get_lists)
-        favourites = await hass.async_add_executor_job(client.get_favourites)
-    except Exception as err:
-        raise UpdateFailed(f"Error fetching AnyList data: {err}") from err
+        return await asyncio.wait_for(
+            _async_fetch_data_stages(hass, client),
+            timeout=ANYLIST_REFRESH_TIMEOUT,
+        )
+    except asyncio.TimeoutError as err:
+        _LOGGER.warning("Timed out fetching AnyList data")
+        raise UpdateFailed("Timed out fetching AnyList data") from err
 
+
+async def _async_fetch_data_stages(
+    hass: HomeAssistant,
+    client: Any,
+) -> dict[str, Any]:
+    """Fetch AnyList data with stage-level logging and errors."""
+    try:
+        _LOGGER.debug("Fetching AnyList lists")
+        lists = await async_call_with_timeout(
+            hass,
+            client.get_lists,
+            timeout=ANYLIST_REQUEST_TIMEOUT,
+        )
+    except AnyListTimeoutError as err:
+        _LOGGER.warning("Timed out fetching AnyList lists")
+        raise UpdateFailed("Timed out fetching AnyList lists") from err
+    except Exception as err:
+        _LOGGER.warning("Failed fetching AnyList lists: %s", err)
+        raise UpdateFailed(f"Error fetching AnyList lists: {err}") from err
+
+    _LOGGER.debug("Fetched %s AnyList list(s)", len(lists))
+
+    try:
+        _LOGGER.debug("Fetching AnyList favourites")
+        favourites = await async_call_with_timeout(
+            hass,
+            client.get_favourites,
+            timeout=ANYLIST_REQUEST_TIMEOUT,
+        )
+    except AnyListTimeoutError as err:
+        _LOGGER.warning("Timed out fetching AnyList favourites")
+        raise UpdateFailed("Timed out fetching AnyList favourites") from err
+    except Exception as err:
+        _LOGGER.warning("Failed fetching AnyList favourites: %s", err)
+        raise UpdateFailed(f"Error fetching AnyList favourites: {err}") from err
+
+    _LOGGER.debug("Fetched %s AnyList favourite(s)", len(favourites))
+    _LOGGER.debug("AnyList data fetch complete")
     return {
         "lists": lists,
         "favourites": favourites,
@@ -392,12 +451,28 @@ async def _async_fetch_data(hass: HomeAssistant, client: Any) -> dict[str, Any]:
 async def _async_refresh_entry(hass: HomeAssistant, entry_id: str) -> dict[str, Any]:
     """Refresh coordinator data for a loaded AnyList config entry."""
     coordinator = hass.data[DOMAIN][entry_id][DATA_COORDINATOR]
-    await coordinator.async_request_refresh()
+    _LOGGER.debug("AnyList refresh started for config entry %s", entry_id)
+    try:
+        await asyncio.wait_for(
+            coordinator.async_request_refresh(),
+            timeout=ANYLIST_REFRESH_TIMEOUT,
+        )
+    except asyncio.TimeoutError as err:
+        _LOGGER.warning("AnyList refresh timed out for config entry %s", entry_id)
+        raise HomeAssistantError("Timed out refreshing AnyList data") from err
+    except Exception as err:
+        _LOGGER.warning(
+            "AnyList refresh failed for config entry %s: %s",
+            entry_id,
+            err,
+        )
+        raise
+    _LOGGER.debug("AnyList refresh succeeded for config entry %s", entry_id)
     return coordinator.data
 
 
 def _enum_name(value: Any) -> str:
-    """Return a stable enum/event name from pyanylist objects."""
+    """Return a stable enum/event name from realtime objects."""
     if isinstance(value, str):
         return value
 
@@ -475,8 +550,10 @@ class _AnyListRealtimeManager:
                     "Starting AnyList realtime sync for config entry %s",
                     self._entry_id,
                 )
-                self._sync = await self._hass.async_add_executor_job(
-                    self._client.start_realtime_sync
+                self._sync = await async_call_with_timeout(
+                    self._hass,
+                    self._client.start_realtime_sync,
+                    timeout=ANYLIST_REQUEST_TIMEOUT,
                 )
                 self._last_state_name = None
                 reconnect_delay = REALTIME_RECONNECT_INITIAL_DELAY
@@ -511,7 +588,7 @@ class _AnyListRealtimeManager:
             )
 
     async def _async_poll_sync(self) -> None:
-        """Poll the pyanylist realtime event queue until disconnect."""
+        """Poll the realtime event queue until disconnect."""
         if self._sync is None:
             raise RuntimeError("Realtime sync was not initialized")
 
@@ -520,8 +597,10 @@ class _AnyListRealtimeManager:
             if sync is None:
                 raise RuntimeError("Realtime sync was disconnected")
 
-            state_name = await self._hass.async_add_executor_job(
-                lambda: _enum_name(sync.state())
+            state_name = await async_call_with_timeout(
+                self._hass,
+                lambda: _enum_name(sync.state()),
+                timeout=ANYLIST_REQUEST_TIMEOUT,
             )
             if state_name != self._last_state_name:
                 _LOGGER.debug(
@@ -534,7 +613,11 @@ class _AnyListRealtimeManager:
             if state_name in {"Disconnected", "Closed"}:
                 raise RuntimeError(f"Realtime sync entered state {state_name}")
 
-            events = await self._hass.async_add_executor_job(sync.poll_events)
+            events = await async_call_with_timeout(
+                self._hass,
+                sync.poll_events,
+                timeout=ANYLIST_REQUEST_TIMEOUT,
+            )
             if events:
                 self._async_handle_events(events)
 
@@ -542,7 +625,7 @@ class _AnyListRealtimeManager:
                 break
 
     def _async_handle_events(self, events: list[Any]) -> None:
-        """Handle a batch of pyanylist realtime events."""
+        """Handle a batch of realtime events."""
         event_names = {_enum_name(event) for event in events}
         _LOGGER.debug(
             "AnyList realtime events for config entry %s: %s",
@@ -633,7 +716,11 @@ class _AnyListRealtimeManager:
         sync = self._sync
         self._sync = None
         with suppress(Exception):
-            await self._hass.async_add_executor_job(sync.disconnect)
+            await async_call_with_timeout(
+                self._hass,
+                sync.disconnect,
+                timeout=ANYLIST_REQUEST_TIMEOUT,
+            )
 
     async def _async_wait_or_stop(self, delay: float) -> bool:
         """Wait for either stop or the requested delay."""
@@ -670,7 +757,11 @@ def _async_register_services(hass: HomeAssistant) -> None:
         query = call.data.get(ATTR_QUERY)
 
         try:
-            recipes = await hass.async_add_executor_job(client.get_recipes)
+            recipes = await async_call_with_timeout(
+                hass,
+                client.get_recipes,
+                timeout=ANYLIST_REQUEST_TIMEOUT,
+            )
         except Exception as err:
             raise HomeAssistantError(
                 f"Failed to load AnyList recipes: {err}"
@@ -748,11 +839,13 @@ def _async_register_services(hass: HomeAssistant) -> None:
         )
 
         try:
-            await hass.async_add_executor_job(
+            await async_call_with_timeout(
+                hass,
                 client.add_recipe_to_list,
                 recipe.id,
                 shopping_list.id,
                 call.data.get(ATTR_SCALE_FACTOR),
+                timeout=ANYLIST_REFRESH_TIMEOUT,
             )
         except Exception as err:
             raise HomeAssistantError(
@@ -786,11 +879,13 @@ def _async_register_services(hass: HomeAssistant) -> None:
         _LOGGER.debug("Creating AnyList recipe '%s'", call.data[ATTR_NAME])
 
         try:
-            recipe = await hass.async_add_executor_job(
+            recipe = await async_call_with_timeout(
+                hass,
                 client.create_recipe,
                 call.data[ATTR_NAME],
                 ingredients,
                 preparation_steps,
+                timeout=ANYLIST_REQUEST_TIMEOUT,
             )
         except Exception as err:
             raise HomeAssistantError(
@@ -831,12 +926,14 @@ def _async_register_services(hass: HomeAssistant) -> None:
         )
 
         try:
-            await hass.async_add_executor_job(
+            await async_call_with_timeout(
+                hass,
                 client.update_recipe,
                 recipe.id,
                 call.data[ATTR_NAME],
                 ingredients,
                 preparation_steps,
+                timeout=ANYLIST_REQUEST_TIMEOUT,
             )
         except Exception as err:
             raise HomeAssistantError(
@@ -883,7 +980,12 @@ def _async_register_services(hass: HomeAssistant) -> None:
         )
 
         try:
-            await hass.async_add_executor_job(client.delete_recipe, recipe.id)
+            await async_call_with_timeout(
+                hass,
+                client.delete_recipe,
+                recipe.id,
+                timeout=ANYLIST_REQUEST_TIMEOUT,
+            )
         except Exception as err:
             raise HomeAssistantError(
                 f"Failed to delete AnyList recipe "
@@ -957,18 +1059,16 @@ def _async_unregister_services(hass: HomeAssistant) -> None:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up AnyList from a config entry."""
-    try:
-        from pyanylist import AnyListClient
-    except ImportError as err:
-        _LOGGER.error("Failed to import pyanylist: %s", err)
-        return False
-
     email = entry.data[CONF_EMAIL]
     password = entry.data[CONF_PASSWORD]
 
     try:
-        client = await hass.async_add_executor_job(
-            AnyListClient.login, email, password
+        client = await async_call_with_timeout(
+            hass,
+            AnyListClient.login,
+            email,
+            password,
+            timeout=ANYLIST_LOGIN_TIMEOUT,
         )
     except Exception as err:
         _LOGGER.error("Failed to authenticate with AnyList: %s", err)
@@ -977,7 +1077,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     icalendar_url = None
     if entry.data.get(CONF_MEAL_PLAN_CALENDAR, False):
         try:
-            info = await hass.async_add_executor_job(client.enable_icalendar)
+            info = await async_call_with_timeout(
+                hass,
+                client.enable_icalendar,
+                timeout=ANYLIST_REQUEST_TIMEOUT,
+            )
             icalendar_url = info.url
             if icalendar_url:
                 _LOGGER.info("AnyList meal plan calendar enabled: %s", icalendar_url)
@@ -995,11 +1099,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER,
         name=DOMAIN,
         update_method=async_update_data,
-        update_interval=None,
+        update_interval=timedelta(seconds=ANYLIST_POLL_INTERVAL),
     )
 
     await coordinator.async_config_entry_first_refresh()
-    realtime_manager = _AnyListRealtimeManager(hass, entry, client, coordinator)
+    realtime_manager = None
 
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = {
@@ -1012,7 +1116,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     platforms = get_platforms(entry)
     await hass.config_entries.async_forward_entry_setups(entry, platforms)
     _async_register_services(hass)
-    realtime_manager.async_start()
+    _LOGGER.debug(
+        "AnyList realtime sync disabled for config entry %s; polling every %s seconds",
+        entry.entry_id,
+        ANYLIST_POLL_INTERVAL,
+    )
 
     return True
 

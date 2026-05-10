@@ -5,10 +5,8 @@
   "config_flow": true,
   "dependencies": [],
   "documentation": "https://github.com/moryoav/ha-anylist",
-  "iot_class": "cloud_push",
+  "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/moryoav/ha-anylist/issues",
-  "requirements": [
-    "pyanylist>=0.0.6"
-  ],
+  "requirements": [],
   "version": "0.3.0"
 }

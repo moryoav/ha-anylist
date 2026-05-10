@@ -26,7 +26,6 @@
     },
     "error": {
       "invalid_auth": "Invalid email or password",
-      "pyanylist_not_installed": "pyanylist library not installed",
       "unknown": "Unexpected error"
     },
     "abort": {
