@@ -1,6 +1,7 @@
 """Todo platform for AnyList integration."""
 from __future__ import annotations
 
+import hashlib
 import logging
 
 from homeassistant.components.todo import (
@@ -129,6 +130,39 @@ class AnyListTodoEntity(CoordinatorEntity, TodoListEntity):
                 break
 
         return items
+
+    @property
+    def extra_state_attributes(self) -> dict[str, str]:
+        """Return dynamic attributes for the todo entity."""
+        entries: list[str] = []
+
+        for shopping_list in self.coordinator.data.get("lists", []):
+            if shopping_list.id != self._list_id:
+                continue
+
+            for item in shopping_list.items:
+                name = str(
+                    getattr(item, "name", None) or getattr(item, "summary", "")
+                ).strip().lower()
+                if not name:
+                    continue
+
+                completed = bool(
+                    getattr(item, "completed", False)
+                    or getattr(item, "is_checked", False)
+                )
+                status = "completed" if completed else "needs_action"
+                entries.append(f"{name}|{status}")
+            break
+
+        items_signature_raw = ",".join(sorted(entries))
+
+        return {
+            "items_signature": hashlib.sha256(
+                items_signature_raw.encode("utf-8")
+            ).hexdigest(),
+            "items_signature_raw": items_signature_raw,
+        }
 
     async def async_create_todo_item(self, item: TodoItem) -> None:
         """Add a new item to the list.
