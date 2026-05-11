@@ -5,6 +5,7 @@ A Home Assistant custom integration for [AnyList](https://www.anylist.com/) shop
 ## Features
 
 - **Shopping Lists** as Todo entities - view, add, check off, and remove items
+- **Shopping list change signatures** - trigger automations when item names or completion states change, not only when the item count changes
 - **Meal Plan iCalendar URL** - exposes your AnyList meal plan URL for use with Home Assistant's iCal integration
 - **Recipe services** - search recipes, fetch one recipe, create/update/delete recipes, and add recipe ingredients to shopping lists from automations or Node-RED
 - **Polling sync fallback** - changes from AnyList are refreshed on a safe polling interval
@@ -37,6 +38,27 @@ Each AnyList shopping list appears as a todo entity. You can:
 - Add new items
 - Check off items
 - Remove items
+
+Todo entities also expose two state attributes for detecting list content changes:
+
+- `items_signature` - a SHA256 hash of the current item names and completion states
+- `items_signature_raw` - the normalized source string used to build the hash
+
+This lets automations react to meaningful shopping list changes even when the
+todo entity's main state value does not change. Previously, an automation that
+watched the shopping list entity could miss updates such as renaming an item,
+because the entity state only reflected the number of items. Now you can trigger
+on `items_signature` and catch added, removed, renamed, checked, and unchecked
+items.
+
+Example automation trigger:
+
+```yaml
+trigger:
+  - platform: state
+    entity_id: todo.groceries
+    attribute: items_signature
+```
 
 ### Meal Plan iCalendar URL Sensor
 
