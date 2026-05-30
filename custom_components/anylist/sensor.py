@@ -1,20 +1,14 @@
 """Sensor platform for AnyList integration."""
 from __future__ import annotations
 
-import logging
-
-from homeassistant.components.sensor import (
-    SensorEntity,
-    SensorEntityDescription,
-)
+from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DATA_ICALENDAR_URL, DOMAIN
-
-_LOGGER = logging.getLogger(__name__)
+from .const import DOMAIN
 
 
 async def async_setup_entry(
@@ -23,8 +17,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up AnyList sensors from a config entry."""
-    data = hass.data[DOMAIN][entry.entry_id]
-    icalendar_url = data.get(DATA_ICALENDAR_URL)
+    icalendar_url = entry.runtime_data.icalendar_url
 
     entities: list[SensorEntity] = []
 
@@ -40,10 +33,16 @@ class AnyListICalendarURLSensor(SensorEntity):
 
     _attr_has_entity_name = True
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_icon = "mdi:calendar-export"
+    _attr_translation_key = "meal_plan_icalendar_url"
 
     def __init__(self, entry: ConfigEntry, icalendar_url: str) -> None:
         """Initialize the sensor."""
         self._attr_unique_id = f"{entry.entry_id}_icalendar_url"
-        self._attr_name = "Meal Plan iCalendar URL"
         self._attr_native_value = icalendar_url
+        self._attr_device_info = DeviceInfo(
+            entry_type=DeviceEntryType.SERVICE,
+            identifiers={(DOMAIN, entry.entry_id)},
+            manufacturer="Purple Cover, Inc.",
+            name="AnyList",
+            configuration_url="https://www.anylist.com/",
+        )

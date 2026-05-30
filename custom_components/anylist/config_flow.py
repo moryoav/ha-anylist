@@ -1,6 +1,7 @@
 """Config flow for AnyList integration."""
 from __future__ import annotations
 
+from collections.abc import Mapping
 import logging
 from typing import Any
 
@@ -16,7 +17,12 @@ from homeassistant.helpers.selector import (
     SelectSelectorMode,
 )
 
-from .client import AnyListClient, async_call_with_timeout
+from .client import (
+    AnyListAuthError,
+    AnyListClient,
+    AnyListHTTPError,
+    async_call_with_timeout,
+)
 from .const import (
     ANYLIST_LOGIN_TIMEOUT,
     ANYLIST_REQUEST_TIMEOUT,
@@ -27,24 +33,80 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-STEP_USER_DATA_SCHEMA = vol.Schema(
-    {
-        vol.Required(CONF_EMAIL): str,
-        vol.Required(CONF_PASSWORD): str,
-    }
-)
+
+class CannotConnect(Exception):
+    """Error to indicate we cannot connect."""
+
+
+class InvalidAuth(Exception):
+    """Error to indicate there is invalid auth."""
+
+
+def _credentials_schema(
+    *,
+    email: str | None = None,
+) -> vol.Schema:
+    """Return a credentials form schema."""
+    email_key = (
+        vol.Required(CONF_EMAIL, default=email)
+        if email is not None
+        else vol.Required(CONF_EMAIL)
+    )
+    return vol.Schema(
+        {
+            email_key: str,
+            vol.Required(CONF_PASSWORD): str,
+        }
+    )
+
+
+async def _async_validate_credentials(
+    hass,
+    email: str,
+    password: str,
+) -> tuple[str, AnyListClient, list[tuple[str, str]]]:
+    """Validate credentials and return account information."""
+    try:
+        client = await async_call_with_timeout(
+            hass,
+            AnyListClient.login,
+            email,
+            password,
+            timeout=ANYLIST_LOGIN_TIMEOUT,
+        )
+        lists = await async_call_with_timeout(
+            hass,
+            client.get_lists,
+            timeout=ANYLIST_REQUEST_TIMEOUT,
+        )
+    except (AnyListAuthError, AnyListHTTPError) as err:
+        if isinstance(err, AnyListHTTPError) and err.status not in {400, 401, 403}:
+            raise CannotConnect from err
+        raise InvalidAuth from err
+    except Exception as err:
+        raise CannotConnect from err
+
+    return client.user_id(), client, [(lst.id, lst.name) for lst in lists]
+
+
+def _entry_option(
+    config_entry: config_entries.ConfigEntry,
+    key: str,
+    default: Any = None,
+) -> Any:
+    """Return an option value, falling back to legacy config entry data."""
+    return config_entry.options.get(key, config_entry.data.get(key, default))
 
 
 class AnyListConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for AnyList."""
 
     VERSION = 1
+    MINOR_VERSION = 2
 
     def __init__(self) -> None:
         """Initialize the config flow."""
         self._user_input: dict[str, Any] = {}
-        self._user_id: str | None = None
-        self._client: Any = None
         self._available_lists: list[tuple[str, str]] = []  # (id, name) pairs
 
     async def async_step_user(
@@ -58,25 +120,13 @@ class AnyListConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             password = user_input[CONF_PASSWORD]
 
             try:
-                # Test the credentials
-                client = await async_call_with_timeout(
-                    self.hass,
-                    AnyListClient.login,
-                    email,
-                    password,
-                    timeout=ANYLIST_LOGIN_TIMEOUT,
+                user_id, _, self._available_lists = await _async_validate_credentials(
+                    self.hass, email, password
                 )
-                user_id = client.user_id()
-                # Fetch available lists
-                lists = await async_call_with_timeout(
-                    self.hass,
-                    client.get_lists,
-                    timeout=ANYLIST_REQUEST_TIMEOUT,
-                )
-                self._available_lists = [(lst.id, lst.name) for lst in lists]
-            except Exception as err:
-                _LOGGER.exception("Failed to authenticate: %s", err)
+            except InvalidAuth:
                 errors["base"] = "invalid_auth"
+            except CannotConnect:
+                errors["base"] = "cannot_connect"
             else:
                 # Check if already configured
                 await self.async_set_unique_id(user_id)
@@ -84,13 +134,88 @@ class AnyListConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
                 # Store for next steps
                 self._user_input = user_input
-                self._user_id = user_id
-                self._client = client
                 return await self.async_step_select_lists()
 
         return self.async_show_form(
             step_id="user",
-            data_schema=STEP_USER_DATA_SCHEMA,
+            data_schema=_credentials_schema(),
+            errors=errors,
+        )
+
+    async def async_step_reauth(
+        self,
+        entry_data: Mapping[str, Any],
+    ) -> ConfigFlowResult:
+        """Perform reauthentication after an authentication failure."""
+        self._user_input = dict(entry_data)
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> ConfigFlowResult:
+        """Confirm and handle AnyList reauthentication."""
+        errors: dict[str, str] = {}
+        reauth_entry = self._get_reauth_entry()
+        email = reauth_entry.data[CONF_EMAIL]
+
+        if user_input is not None:
+            password = user_input[CONF_PASSWORD]
+            try:
+                user_id, _, _ = await _async_validate_credentials(
+                    self.hass, email, password
+                )
+            except InvalidAuth:
+                errors["base"] = "invalid_auth"
+            except CannotConnect:
+                errors["base"] = "cannot_connect"
+            else:
+                await self.async_set_unique_id(user_id)
+                self._abort_if_unique_id_mismatch()
+                return self.async_update_reload_and_abort(
+                    reauth_entry,
+                    data_updates={CONF_PASSWORD: password},
+                )
+
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=vol.Schema({vol.Required(CONF_PASSWORD): str}),
+            errors=errors,
+        )
+
+    async def async_step_reconfigure(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> ConfigFlowResult:
+        """Reconfigure AnyList account credentials."""
+        errors: dict[str, str] = {}
+        reconfigure_entry = self._get_reconfigure_entry()
+
+        if user_input is not None:
+            email = user_input[CONF_EMAIL]
+            password = user_input[CONF_PASSWORD]
+            try:
+                user_id, _, _ = await _async_validate_credentials(
+                    self.hass, email, password
+                )
+            except InvalidAuth:
+                errors["base"] = "invalid_auth"
+            except CannotConnect:
+                errors["base"] = "cannot_connect"
+            else:
+                await self.async_set_unique_id(user_id)
+                self._abort_if_unique_id_mismatch()
+                return self.async_update_reload_and_abort(
+                    reconfigure_entry,
+                    data_updates={
+                        CONF_EMAIL: email,
+                        CONF_PASSWORD: password,
+                    },
+                )
+
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=_credentials_schema(email=reconfigure_entry.data[CONF_EMAIL]),
             errors=errors,
         )
 
@@ -135,11 +260,16 @@ class AnyListConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         """Handle the options step."""
         if user_input is not None:
-            # Merge with credentials and list selection
-            data = {**self._user_input, **user_input}
             return self.async_create_entry(
                 title=self._user_input[CONF_EMAIL],
-                data=data,
+                data={
+                    CONF_EMAIL: self._user_input[CONF_EMAIL],
+                    CONF_PASSWORD: self._user_input[CONF_PASSWORD],
+                },
+                options={
+                    CONF_SELECTED_LISTS: self._user_input.get(CONF_SELECTED_LISTS, []),
+                    **user_input,
+                },
             )
 
         return self.async_show_form(
@@ -173,27 +303,19 @@ class AnyListOptionsFlowHandler(config_entries.OptionsFlow):
         """Manage the options."""
         errors: dict[str, str] = {}
 
-        # Get client to fetch current lists
-        if DOMAIN in self.hass.data and self.config_entry.entry_id in self.hass.data[DOMAIN]:
-            from .const import DATA_CLIENT
-            client = self.hass.data[DOMAIN][self.config_entry.entry_id].get(DATA_CLIENT)
-            if client:
-                try:
-                    lists = await async_call_with_timeout(
-                        self.hass,
-                        client.get_lists,
-                        timeout=ANYLIST_REQUEST_TIMEOUT,
-                    )
-                    self._available_lists = [(lst.id, lst.name) for lst in lists]
-                except Exception as err:
-                    _LOGGER.warning("Failed to fetch lists: %s", err)
+        runtime_data = getattr(self.config_entry, "runtime_data", None)
+        if runtime_data is not None:
+            try:
+                lists = await async_call_with_timeout(
+                    self.hass,
+                    runtime_data.client.get_lists,
+                    timeout=ANYLIST_REQUEST_TIMEOUT,
+                )
+                self._available_lists = [(lst.id, lst.name) for lst in lists]
+            except Exception as err:
+                _LOGGER.warning("Failed to fetch AnyList lists for options: %s", err)
 
         if user_input is not None:
-            # Update the config entry data
-            new_data = {**self.config_entry.data, **user_input}
-            self.hass.config_entries.async_update_entry(
-                self.config_entry, data=new_data
-            )
             return self.async_create_entry(title="", data=user_input)
 
         # Build list options
@@ -203,7 +325,7 @@ class AnyListOptionsFlowHandler(config_entries.OptionsFlow):
         ]
 
         # Get current selections
-        current_selected = self.config_entry.data.get(CONF_SELECTED_LISTS, [])
+        current_selected = _entry_option(self.config_entry, CONF_SELECTED_LISTS, [])
         # If no lists were previously selected, default to all
         if not current_selected and self._available_lists:
             current_selected = [list_id for list_id, _ in self._available_lists]
@@ -224,7 +346,7 @@ class AnyListOptionsFlowHandler(config_entries.OptionsFlow):
 
         schema_dict[vol.Optional(
             CONF_MEAL_PLAN_CALENDAR,
-            default=self.config_entry.data.get(CONF_MEAL_PLAN_CALENDAR, False),
+            default=_entry_option(self.config_entry, CONF_MEAL_PLAN_CALENDAR, False),
         )] = bool
 
         return self.async_show_form(
