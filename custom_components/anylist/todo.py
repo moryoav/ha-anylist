@@ -13,19 +13,20 @@ from homeassistant.components.todo import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, CoordinatorEntity
 
 from .client import async_call_with_timeout
 from .const import (
     ANYLIST_REQUEST_TIMEOUT,
     CONF_SELECTED_LISTS,
-    DATA_CLIENT,
-    DATA_COORDINATOR,
     DOMAIN,
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+PARALLEL_UPDATES = 0
 
 
 async def async_setup_entry(
@@ -34,15 +35,18 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the AnyList todo platform."""
-    data = hass.data[DOMAIN][config_entry.entry_id]
-    coordinator = data[DATA_COORDINATOR]
-    client = data[DATA_CLIENT]
+    runtime_data = config_entry.runtime_data
+    coordinator = runtime_data.coordinator
+    client = runtime_data.client
 
     # Track which list IDs we've created entities for
     known_list_ids: set[str] = set()
 
     # Get selected lists from config (empty list means all lists)
-    selected_lists = config_entry.data.get(CONF_SELECTED_LISTS, [])
+    selected_lists = config_entry.options.get(
+        CONF_SELECTED_LISTS,
+        config_entry.data.get(CONF_SELECTED_LISTS, []),
+    )
 
     @callback
     def _async_add_new_lists() -> None:
@@ -86,7 +90,7 @@ class AnyListTodoEntity(CoordinatorEntity, TodoListEntity):
 
     def __init__(
         self,
-        coordinator,
+        coordinator: DataUpdateCoordinator,
         client,
         shopping_list,
         config_entry: ConfigEntry,
@@ -97,6 +101,13 @@ class AnyListTodoEntity(CoordinatorEntity, TodoListEntity):
         self._list_id = shopping_list.id
         self._attr_unique_id = f"anylist_{shopping_list.id}"
         self._attr_name = shopping_list.name
+        self._attr_device_info = DeviceInfo(
+            entry_type=DeviceEntryType.SERVICE,
+            identifiers={(DOMAIN, config_entry.entry_id)},
+            manufacturer="Purple Cover, Inc.",
+            name="AnyList",
+            configuration_url="https://www.anylist.com/",
+        )
 
     @property
     def todo_items(self) -> list[TodoItem]:

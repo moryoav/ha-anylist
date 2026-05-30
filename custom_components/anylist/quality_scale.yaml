@@ -1,0 +1,82 @@
+rules:
+  action-setup: done
+  appropriate-polling: done
+  brands: done
+  common-modules: done
+  config-flow: done
+  dependency-transparency: done
+  docs-actions: done
+  docs-high-level-description: done
+  docs-installation-instructions: done
+  docs-removal-instructions: done
+  entity-event-setup:
+    status: exempt
+    comment: Entities use DataUpdateCoordinator listeners and do not subscribe to external event callbacks.
+  entity-unique-id: done
+  has-entity-name: done
+  runtime-data: done
+  test-before-configure: done
+  test-before-setup: done
+  unique-config-entry: done
+
+  action-exceptions: done
+  config-entry-unloading: done
+  docs-configuration-parameters: done
+  docs-installation-parameters: done
+  entity-unavailable: done
+  integration-owner: done
+  log-when-unavailable: done
+  parallel-updates: done
+  reauthentication-flow: done
+
+  devices: done
+  diagnostics: done
+  discovery:
+    status: exempt
+    comment: AnyList is a cloud account service and does not expose discoverable local devices.
+  discovery-update-info:
+    status: exempt
+    comment: There is no discovery source for this cloud account integration.
+  docs-data-update: done
+  docs-examples: done
+  docs-known-limitations: done
+  docs-supported-devices: done
+  docs-supported-functions: done
+  docs-troubleshooting: done
+  docs-use-cases: done
+  dynamic-devices:
+    status: exempt
+    comment: Shopping lists are dynamic entities under one AnyList service device, not separately discovered devices.
+  entity-category: done
+  entity-device-class:
+    status: exempt
+    comment: Todo entities and the diagnostic URL sensor do not have applicable device classes.
+  entity-disabled-by-default:
+    status: exempt
+    comment: The integration exposes selected shopping lists and one optional diagnostic sensor only.
+  entity-translations: done
+  exception-translations: done
+  icon-translations: done
+  reconfiguration-flow: done
+  repair-issues:
+    status: exempt
+    comment: Authentication failures use ConfigEntryAuthFailed and the reauthentication flow; no additional repair flow is currently needed.
+  stale-devices:
+    status: exempt
+    comment: The integration creates one service device for the AnyList account; lists are entities and are filtered by options.
+
+  async-dependency:
+    status: exempt
+    comment: The integration uses a bundled pure-Python client for an unofficial API and runs blocking calls in the executor with timeouts.
+  inject-websession:
+    status: exempt
+    comment: The bundled client uses urllib for multipart protobuf requests and has no aiohttp web session to inject.
+  config-flow-test-coverage:
+    status: todo
+    comment: Add Home Assistant pytest coverage for user, options, reauth, and reconfigure flows before claiming platinum-level confidence.
+  test-coverage:
+    status: todo
+    comment: Existing tests cover the local client subset; broad Home Assistant integration coverage remains to be added.
+  strict-typing:
+    status: todo
+    comment: Type annotations are present, but strict project-wide pyright/mypy coverage is not yet enforced.

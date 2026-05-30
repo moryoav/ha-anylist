@@ -1,0 +1,9 @@
+{
+  "entity": {
+    "sensor": {
+      "meal_plan_icalendar_url": {
+        "default": "mdi:calendar-export"
+      }
+    }
+  }
+}

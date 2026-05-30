@@ -1,4 +1,5 @@
 {
+  "title": "AnyList",
   "config": {
     "step": {
       "user": {
@@ -7,6 +8,10 @@
         "data": {
           "email": "Email",
           "password": "Password"
+        },
+        "data_description": {
+          "email": "Your AnyList account email address.",
+          "password": "Your AnyList account password."
         }
       },
       "select_lists": {
@@ -14,6 +19,9 @@
         "description": "Choose which shopping lists to enable in Home Assistant.",
         "data": {
           "selected_lists": "Shopping Lists"
+        },
+        "data_description": {
+          "selected_lists": "The AnyList shopping lists to expose as Home Assistant todo entities."
         }
       },
       "options": {
@@ -21,15 +29,37 @@
         "description": "Configure additional features for your AnyList integration.",
         "data": {
           "meal_plan_calendar": "Enable Meal Plan Calendar URL"
+        },
+        "data_description": {
+          "meal_plan_calendar": "Expose a diagnostic sensor containing the AnyList meal plan iCalendar URL."
+        }
+      },
+      "reauth_confirm": {
+        "title": "[%key:common::config_flow::title::reauth%]",
+        "description": "Enter your AnyList password to reconnect your account."
+      },
+      "reconfigure": {
+        "title": "Reconfigure AnyList",
+        "description": "Update the AnyList account used by this integration.",
+        "data": {
+          "email": "Email",
+          "password": "Password"
+        },
+        "data_description": {
+          "email": "Your AnyList account email address.",
+          "password": "Your AnyList account password."
         }
       }
     },
     "error": {
+      "cannot_connect": "Failed to connect",
       "invalid_auth": "Invalid email or password",
       "unknown": "Unexpected error"
     },
     "abort": {
-      "already_configured": "This AnyList account is already configured"
+      "already_configured": "This AnyList account is already configured",
+      "reauth_successful": "[%key:common::config_flow::abort::reauth_successful%]",
+      "reconfigure_successful": "Reconfiguration was successful"
     }
   },
   "options": {
@@ -40,8 +70,66 @@
         "data": {
           "selected_lists": "Shopping Lists",
           "meal_plan_calendar": "Enable Meal Plan Calendar URL"
+        },
+        "data_description": {
+          "selected_lists": "The AnyList shopping lists to expose as Home Assistant todo entities.",
+          "meal_plan_calendar": "Expose a diagnostic sensor containing the AnyList meal plan iCalendar URL."
         }
       }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "meal_plan_icalendar_url": {
+        "name": "Meal plan iCalendar URL"
+      }
+    }
+  },
+  "exceptions": {
+    "no_loaded_entries": {
+      "message": "No loaded AnyList config entries are available."
+    },
+    "config_entry_not_found": {
+      "message": "AnyList config entry {config_entry_id} was not found."
+    },
+    "config_entry_not_loaded": {
+      "message": "AnyList config entry {config_entry_id} is not loaded."
+    },
+    "multiple_entries": {
+      "message": "Multiple AnyList config entries are loaded. Specify config_entry_id."
+    },
+    "exactly_one_field": {
+      "message": "Provide exactly one of {first_label} or {second_label}."
+    },
+    "recipe_load_failed": {
+      "message": "Failed to load AnyList recipe {identifier}: {error}"
+    },
+    "recipe_not_found": {
+      "message": "AnyList recipe {identifier} was not found."
+    },
+    "shopping_lists_load_failed": {
+      "message": "Failed to load AnyList shopping lists: {error}"
+    },
+    "shopping_list_not_found": {
+      "message": "AnyList shopping list {identifier} was not found."
+    },
+    "refresh_timed_out": {
+      "message": "Timed out refreshing AnyList data."
+    },
+    "recipes_load_failed": {
+      "message": "Failed to load AnyList recipes: {error}"
+    },
+    "add_recipe_to_list_failed": {
+      "message": "Failed to add recipe {recipe} to shopping list {shopping_list}: {error}"
+    },
+    "create_recipe_failed": {
+      "message": "Failed to create AnyList recipe {recipe}: {error}"
+    },
+    "update_recipe_failed": {
+      "message": "Failed to update AnyList recipe {recipe}: {error}"
+    },
+    "delete_recipe_failed": {
+      "message": "Failed to delete AnyList recipe {recipe}: {error}"
     }
   }
 }

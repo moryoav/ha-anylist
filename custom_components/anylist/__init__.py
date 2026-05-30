@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
+from dataclasses import dataclass
 from datetime import timedelta
 import logging
-from contextlib import suppress
 from typing import Any
 
 import voluptuous as vol
@@ -17,12 +18,19 @@ from homeassistant.core import (
     ServiceResponse,
     SupportsResponse,
 )
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import (
+    ConfigEntryAuthFailed,
+    ConfigEntryNotReady,
+    HomeAssistantError,
+)
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .client import (
+    AnyListAuthError,
     AnyListClient,
+    AnyListError,
+    AnyListHTTPError,
     AnyListTimeoutError,
     Ingredient,
     async_call_with_timeout,
@@ -50,10 +58,7 @@ from .const import (
     CONF_EMAIL,
     CONF_MEAL_PLAN_CALENDAR,
     CONF_PASSWORD,
-    DATA_CLIENT,
-    DATA_COORDINATOR,
-    DATA_ICALENDAR_URL,
-    DATA_REALTIME_MANAGER,
+    CONF_SELECTED_LISTS,
     DOMAIN,
     REALTIME_EVENT_POLL_INTERVAL,
     REALTIME_RECONNECT_INITIAL_DELAY,
@@ -91,15 +96,15 @@ _REALTIME_REFRESH_EVENT_NAMES = frozenset(
 # Base platforms always loaded
 BASE_PLATFORMS: list[Platform] = [Platform.TODO]
 
-REGISTERED_SERVICES = (
-    SERVICE_REFRESH,
-    SERVICE_GET_RECIPES,
-    SERVICE_GET_RECIPE,
-    SERVICE_ADD_RECIPE_TO_LIST,
-    SERVICE_CREATE_RECIPE,
-    SERVICE_UPDATE_RECIPE,
-    SERVICE_DELETE_RECIPE,
-)
+@dataclass(slots=True)
+class AnyListRuntimeData:
+    """Runtime data for a loaded AnyList config entry."""
+
+    client: AnyListClient
+    coordinator: DataUpdateCoordinator[dict[str, Any]]
+    icalendar_url: str | None
+    realtime_manager: _AnyListRealtimeManager | None = None
+
 
 INGREDIENT_INPUT_SCHEMA = vol.Schema(
     {
@@ -187,12 +192,40 @@ DELETE_RECIPE_SERVICE_SCHEMA = vol.Schema(
 )
 
 
+def _entry_option(entry: ConfigEntry, key: str, default: Any = None) -> Any:
+    """Return an option value, falling back to legacy data storage."""
+    return entry.options.get(key, entry.data.get(key, default))
+
+
 def get_platforms(entry: ConfigEntry) -> list[Platform]:
     """Get platforms to load based on config."""
     platforms = list(BASE_PLATFORMS)
-    if entry.data.get(CONF_MEAL_PLAN_CALENDAR, False):
+    if _entry_option(entry, CONF_MEAL_PLAN_CALENDAR, False):
         platforms.append(Platform.SENSOR)
     return platforms
+
+
+def _translated_error(
+    translation_key: str,
+    **placeholders: Any,
+) -> HomeAssistantError:
+    """Build a translated Home Assistant service error."""
+    return HomeAssistantError(
+        translation_domain=DOMAIN,
+        translation_key=translation_key,
+        translation_placeholders={
+            key: str(value)
+            for key, value in placeholders.items()
+            if value is not None
+        },
+    )
+
+
+def _is_auth_error(err: Exception) -> bool:
+    """Return whether an exception should trigger reauthentication."""
+    return isinstance(err, AnyListAuthError) or (
+        isinstance(err, AnyListHTTPError) and err.status in {400, 401, 403}
+    )
 
 
 def _value_is_set(value: Any) -> bool:
@@ -269,12 +302,16 @@ def _build_ingredients(ingredients_data: list[dict[str, Any]]) -> list[Any]:
 def _get_entry_runtime_data(
     hass: HomeAssistant,
     config_entry_id: str | None,
-) -> tuple[str, dict[str, Any]]:
+) -> tuple[str, AnyListRuntimeData]:
     """Resolve the AnyList runtime data for a service call."""
-    entries: dict[str, dict[str, Any]] = hass.data.get(DOMAIN, {})
+    entries: dict[str, AnyListRuntimeData] = {
+        entry.entry_id: runtime_data
+        for entry in hass.config_entries.async_entries(DOMAIN)
+        if (runtime_data := getattr(entry, "runtime_data", None)) is not None
+    }
 
     if not entries:
-        raise HomeAssistantError("No loaded AnyList config entries are available.")
+        raise _translated_error("no_loaded_entries")
 
     if _value_is_set(config_entry_id):
         assert config_entry_id is not None
@@ -282,20 +319,20 @@ def _get_entry_runtime_data(
             return config_entry_id, entry_data
 
         if hass.config_entries.async_get_entry(config_entry_id) is None:
-            raise HomeAssistantError(
-                f"AnyList config entry '{config_entry_id}' was not found."
+            raise _translated_error(
+                "config_entry_not_found",
+                config_entry_id=config_entry_id,
             )
 
-        raise HomeAssistantError(
-            f"AnyList config entry '{config_entry_id}' is not loaded."
+        raise _translated_error(
+            "config_entry_not_loaded",
+            config_entry_id=config_entry_id,
         )
 
     if len(entries) == 1:
         return next(iter(entries.items()))
 
-    raise HomeAssistantError(
-        "Multiple AnyList config entries are loaded. Specify config_entry_id."
-    )
+    raise _translated_error("multiple_entries")
 
 
 def _validate_exactly_one(
@@ -307,8 +344,10 @@ def _validate_exactly_one(
 ) -> None:
     """Validate that exactly one of two service fields is set."""
     if _value_is_set(first_value) == _value_is_set(second_value):
-        raise HomeAssistantError(
-            f"Provide exactly one of '{first_label}' or '{second_label}'."
+        raise _translated_error(
+            "exactly_one_field",
+            first_label=first_label,
+            second_label=second_label,
         )
 
 
@@ -346,12 +385,14 @@ async def _async_resolve_recipe(
                 timeout=ANYLIST_REQUEST_TIMEOUT,
             )
     except Exception as err:
-        raise HomeAssistantError(
-            f"Failed to load AnyList recipe '{identifier}': {err}"
+        raise _translated_error(
+            "recipe_load_failed",
+            identifier=identifier,
+            error=err,
         ) from err
 
     if recipe is None:
-        raise HomeAssistantError(f"AnyList recipe '{identifier}' was not found.")
+        raise _translated_error("recipe_not_found", identifier=identifier)
 
     return recipe
 
@@ -378,9 +419,7 @@ async def _async_resolve_list(
             timeout=ANYLIST_REQUEST_TIMEOUT,
         )
     except Exception as err:
-        raise HomeAssistantError(
-            f"Failed to load AnyList shopping lists: {err}"
-        ) from err
+        raise _translated_error("shopping_lists_load_failed", error=err) from err
 
     for shopping_list in lists:
         if _value_is_set(list_id) and shopping_list.id == list_id:
@@ -389,7 +428,7 @@ async def _async_resolve_list(
             return shopping_list
 
     identifier = list_id if _value_is_set(list_id) else list_name
-    raise HomeAssistantError(f"AnyList shopping list '{identifier}' was not found.")
+    raise _translated_error("shopping_list_not_found", identifier=identifier)
 
 
 async def _async_fetch_data(hass: HomeAssistant, client: Any) -> dict[str, Any]:
@@ -401,7 +440,6 @@ async def _async_fetch_data(hass: HomeAssistant, client: Any) -> dict[str, Any]:
             timeout=ANYLIST_REFRESH_TIMEOUT,
         )
     except asyncio.TimeoutError as err:
-        _LOGGER.warning("Timed out fetching AnyList data")
         raise UpdateFailed("Timed out fetching AnyList data") from err
 
 
@@ -418,10 +456,10 @@ async def _async_fetch_data_stages(
             timeout=ANYLIST_REQUEST_TIMEOUT,
         )
     except AnyListTimeoutError as err:
-        _LOGGER.warning("Timed out fetching AnyList lists")
         raise UpdateFailed("Timed out fetching AnyList lists") from err
     except Exception as err:
-        _LOGGER.warning("Failed fetching AnyList lists: %s", err)
+        if _is_auth_error(err):
+            raise ConfigEntryAuthFailed("AnyList authentication failed") from err
         raise UpdateFailed(f"Error fetching AnyList lists: {err}") from err
 
     _LOGGER.debug("Fetched %s AnyList list(s)", len(lists))
@@ -434,10 +472,10 @@ async def _async_fetch_data_stages(
             timeout=ANYLIST_REQUEST_TIMEOUT,
         )
     except AnyListTimeoutError as err:
-        _LOGGER.warning("Timed out fetching AnyList favourites")
         raise UpdateFailed("Timed out fetching AnyList favourites") from err
     except Exception as err:
-        _LOGGER.warning("Failed fetching AnyList favourites: %s", err)
+        if _is_auth_error(err):
+            raise ConfigEntryAuthFailed("AnyList authentication failed") from err
         raise UpdateFailed(f"Error fetching AnyList favourites: {err}") from err
 
     _LOGGER.debug("Fetched %s AnyList favourite(s)", len(favourites))
@@ -450,7 +488,7 @@ async def _async_fetch_data_stages(
 
 async def _async_refresh_entry(hass: HomeAssistant, entry_id: str) -> dict[str, Any]:
     """Refresh coordinator data for a loaded AnyList config entry."""
-    coordinator = hass.data[DOMAIN][entry_id][DATA_COORDINATOR]
+    coordinator = _get_entry_runtime_data(hass, entry_id)[1].coordinator
     _LOGGER.debug("AnyList refresh started for config entry %s", entry_id)
     try:
         await asyncio.wait_for(
@@ -459,7 +497,7 @@ async def _async_refresh_entry(hass: HomeAssistant, entry_id: str) -> dict[str, 
         )
     except asyncio.TimeoutError as err:
         _LOGGER.warning("AnyList refresh timed out for config entry %s", entry_id)
-        raise HomeAssistantError("Timed out refreshing AnyList data") from err
+        raise _translated_error("refresh_timed_out") from err
     except Exception as err:
         _LOGGER.warning(
             "AnyList refresh failed for config entry %s: %s",
@@ -751,7 +789,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
             hass,
             call.data.get(ATTR_CONFIG_ENTRY_ID),
         )
-        client = entry_data[DATA_CLIENT]
+        client = entry_data.client
         include_ingredients = call.data[ATTR_INCLUDE_INGREDIENTS]
         include_steps = call.data[ATTR_INCLUDE_STEPS]
         query = call.data.get(ATTR_QUERY)
@@ -763,9 +801,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
                 timeout=ANYLIST_REQUEST_TIMEOUT,
             )
         except Exception as err:
-            raise HomeAssistantError(
-                f"Failed to load AnyList recipes: {err}"
-            ) from err
+            raise _translated_error("recipes_load_failed", error=err) from err
 
         if query:
             query_lower = query.lower()
@@ -792,7 +828,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
             hass,
             call.data.get(ATTR_CONFIG_ENTRY_ID),
         )
-        client = entry_data[DATA_CLIENT]
+        client = entry_data.client
         recipe = await _async_resolve_recipe(
             hass,
             client,
@@ -817,7 +853,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
             hass,
             call.data.get(ATTR_CONFIG_ENTRY_ID),
         )
-        client = entry_data[DATA_CLIENT]
+        client = entry_data.client
         recipe = await _async_resolve_recipe(
             hass,
             client,
@@ -848,9 +884,11 @@ def _async_register_services(hass: HomeAssistant) -> None:
                 timeout=ANYLIST_REFRESH_TIMEOUT,
             )
         except Exception as err:
-            raise HomeAssistantError(
-                f"Failed to add recipe '{getattr(recipe, ATTR_NAME, recipe.id)}' "
-                f"to shopping list '{shopping_list.name}': {err}"
+            raise _translated_error(
+                "add_recipe_to_list_failed",
+                recipe=getattr(recipe, ATTR_NAME, recipe.id),
+                shopping_list=shopping_list.name,
+                error=err,
             ) from err
 
         await _async_refresh_entry(hass, entry_id)
@@ -872,7 +910,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
             hass,
             call.data.get(ATTR_CONFIG_ENTRY_ID),
         )
-        client = entry_data[DATA_CLIENT]
+        client = entry_data.client
         ingredients = _build_ingredients(call.data[ATTR_INGREDIENTS])
         preparation_steps = call.data[ATTR_PREPARATION_STEPS]
 
@@ -888,8 +926,10 @@ def _async_register_services(hass: HomeAssistant) -> None:
                 timeout=ANYLIST_REQUEST_TIMEOUT,
             )
         except Exception as err:
-            raise HomeAssistantError(
-                f"Failed to create AnyList recipe '{call.data[ATTR_NAME]}': {err}"
+            raise _translated_error(
+                "create_recipe_failed",
+                recipe=call.data[ATTR_NAME],
+                error=err,
             ) from err
 
         if not call.return_response:
@@ -909,7 +949,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
             hass,
             call.data.get(ATTR_CONFIG_ENTRY_ID),
         )
-        client = entry_data[DATA_CLIENT]
+        client = entry_data.client
         recipe = await _async_resolve_recipe(
             hass,
             client,
@@ -936,9 +976,10 @@ def _async_register_services(hass: HomeAssistant) -> None:
                 timeout=ANYLIST_REQUEST_TIMEOUT,
             )
         except Exception as err:
-            raise HomeAssistantError(
-                f"Failed to update AnyList recipe "
-                f"'{getattr(recipe, ATTR_NAME, recipe.id)}': {err}"
+            raise _translated_error(
+                "update_recipe_failed",
+                recipe=getattr(recipe, ATTR_NAME, recipe.id),
+                error=err,
             ) from err
 
         if not call.return_response:
@@ -965,7 +1006,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
             hass,
             call.data.get(ATTR_CONFIG_ENTRY_ID),
         )
-        client = entry_data[DATA_CLIENT]
+        client = entry_data.client
         recipe = await _async_resolve_recipe(
             hass,
             client,
@@ -987,9 +1028,10 @@ def _async_register_services(hass: HomeAssistant) -> None:
                 timeout=ANYLIST_REQUEST_TIMEOUT,
             )
         except Exception as err:
-            raise HomeAssistantError(
-                f"Failed to delete AnyList recipe "
-                f"'{getattr(recipe, ATTR_NAME, recipe.id)}': {err}"
+            raise _translated_error(
+                "delete_recipe_failed",
+                recipe=getattr(recipe, ATTR_NAME, recipe.id),
+                error=err,
             ) from err
 
         if not call.return_response:
@@ -1050,11 +1092,49 @@ def _async_register_services(hass: HomeAssistant) -> None:
     )
 
 
-def _async_unregister_services(hass: HomeAssistant) -> None:
-    """Unregister AnyList services."""
-    for service in REGISTERED_SERVICES:
-        if hass.services.has_service(DOMAIN, service):
-            hass.services.async_remove(DOMAIN, service)
+async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
+    """Set up the AnyList integration."""
+    _async_register_services(hass)
+    return True
+
+
+async def _async_update_listener(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+) -> None:
+    """Reload AnyList when options are changed."""
+    await hass.config_entries.async_reload(entry.entry_id)
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate old AnyList config entries."""
+    _LOGGER.debug(
+        "Migrating AnyList config entry from version %s.%s",
+        entry.version,
+        entry.minor_version,
+    )
+
+    if entry.version > 1:
+        return False
+
+    data = dict(entry.data)
+    options = dict(entry.options)
+
+    if entry.minor_version < 2:
+        for key in (CONF_SELECTED_LISTS, CONF_MEAL_PLAN_CALENDAR):
+            if key in data and key not in options:
+                options[key] = data.pop(key)
+
+        hass.config_entries.async_update_entry(
+            entry,
+            data=data,
+            options=options,
+            version=1,
+            minor_version=2,
+        )
+
+    _LOGGER.debug("Migration to AnyList config entry version 1.2 successful")
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -1071,11 +1151,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             timeout=ANYLIST_LOGIN_TIMEOUT,
         )
     except Exception as err:
-        _LOGGER.error("Failed to authenticate with AnyList: %s", err)
-        return False
+        if _is_auth_error(err):
+            raise ConfigEntryAuthFailed("AnyList authentication failed") from err
+
+        if isinstance(err, AnyListError):
+            raise ConfigEntryNotReady(f"Failed to connect to AnyList: {err}") from err
+
+        raise ConfigEntryNotReady(f"Unexpected AnyList setup failure: {err}") from err
 
     icalendar_url = None
-    if entry.data.get(CONF_MEAL_PLAN_CALENDAR, False):
+    if _entry_option(entry, CONF_MEAL_PLAN_CALENDAR, False):
         try:
             info = await async_call_with_timeout(
                 hass,
@@ -1106,17 +1191,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await coordinator.async_config_entry_first_refresh()
     realtime_manager = None
 
-    hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = {
-        DATA_CLIENT: client,
-        DATA_COORDINATOR: coordinator,
-        DATA_ICALENDAR_URL: icalendar_url,
-        DATA_REALTIME_MANAGER: realtime_manager,
-    }
+    entry.runtime_data = AnyListRuntimeData(
+        client=client,
+        coordinator=coordinator,
+        icalendar_url=icalendar_url,
+        realtime_manager=realtime_manager,
+    )
+    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
     platforms = get_platforms(entry)
     await hass.config_entries.async_forward_entry_setups(entry, platforms)
-    _async_register_services(hass)
     _LOGGER.debug(
         "AnyList realtime sync disabled for config entry %s; polling every %s seconds",
         entry.entry_id,
@@ -1130,11 +1214,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     platforms = get_platforms(entry)
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, platforms):
-        entry_data = hass.data[DOMAIN].pop(entry.entry_id)
-        realtime_manager = entry_data.get(DATA_REALTIME_MANAGER)
+        runtime_data = getattr(entry, "runtime_data", None)
+        realtime_manager = (
+            runtime_data.realtime_manager if runtime_data is not None else None
+        )
         if realtime_manager is not None:
             await realtime_manager.async_stop()
-        if not hass.data[DOMAIN]:
-            _async_unregister_services(hass)
+        entry.runtime_data = None
 
     return unload_ok

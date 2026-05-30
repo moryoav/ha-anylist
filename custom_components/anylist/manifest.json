@@ -3,10 +3,10 @@
   "name": "AnyList",
   "codeowners": ["@moryoav"],
   "config_flow": true,
-  "dependencies": [],
   "documentation": "https://github.com/moryoav/ha-anylist",
+  "integration_type": "service",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/moryoav/ha-anylist/issues",
   "requirements": [],
-  "version": "0.3.0"
+  "version": "0.4.0"
 }
