@@ -8,6 +8,7 @@ AnyList is a shared grocery list and meal planning service. This integration bri
 ## Features
 
 - **Shopping lists** as todo entities: view, add, check off, and remove items.
+- **Automatic AnyList categories** when adding known items from Home Assistant.
 - **Shopping list change signatures** for automations that need to detect renamed, added, removed, checked, or unchecked items.
 - **Meal plan iCalendar URL** as a diagnostic sensor when the option is enabled.
 - **Recipe actions** to search recipes, fetch one recipe, create/update/delete recipes, and add recipe ingredients to shopping lists.
@@ -59,6 +60,10 @@ Each selected AnyList shopping list appears as a todo entity. You can:
 - Add new items.
 - Check off and uncheck items.
 - Remove one or more items.
+
+When Home Assistant adds an item that AnyList already knows how to categorize
+for that list, the integration sends the same category assignment metadata used
+by the AnyList app, so known grocery items land in their usual categories.
 
 Todo entities expose these state attributes for content-change detection:
 

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.3 - 2026-06-21
+
+- Document automatic AnyList category reuse for items added from Home Assistant.
+
 ## 0.4.2 - 2026-06-21
 
 - Use AnyList's learned per-list item category assignments when adding todo
