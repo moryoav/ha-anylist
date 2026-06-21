@@ -17,6 +17,7 @@ from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, CoordinatorEntity
 
+from .category import resolve_category_for_item
 from .client import async_call_with_timeout
 from .const import (
     ANYLIST_REQUEST_TIMEOUT,
@@ -197,7 +198,24 @@ class AnyListTodoEntity(CoordinatorEntity, TodoListEntity):
                 self._list_id,
                 existing_item.uid,
             )
-        elif item.description:
+        else:
+            category = resolve_category_for_item(
+                item.summary,
+                self._list_id,
+                self.coordinator.data.get("lists", []),
+                self.coordinator.data.get("favourites", []),
+            )
+
+            if not item.description and category is None:
+                await self._async_call_client(
+                    "create todo item",
+                    self._client.add_item,
+                    self._list_id,
+                    item.summary,
+                )
+                await self.coordinator.async_request_refresh()
+                return
+
             await self._async_call_client(
                 "create todo item with details",
                 self._client.add_item_with_details,
@@ -205,14 +223,7 @@ class AnyListTodoEntity(CoordinatorEntity, TodoListEntity):
                 item.summary,
                 None,  # quantity
                 item.description,  # details
-                None,  # category
-            )
-        else:
-            await self._async_call_client(
-                "create todo item",
-                self._client.add_item,
-                self._list_id,
-                item.summary,
+                category,
             )
         await self.coordinator.async_request_refresh()
 

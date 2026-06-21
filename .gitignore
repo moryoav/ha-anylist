@@ -26,3 +26,7 @@ Thumbs.db
 # Home Assistant
 config/
 *.log
+
+# Local agent notes
+AGENTS.md
+agents.md

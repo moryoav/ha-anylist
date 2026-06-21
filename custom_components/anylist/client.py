@@ -889,6 +889,7 @@ class AnyListClient:
             quantity=quantity,
             details=details,
             category=category,
+            category_match_id=category,
         )
         operation = _pb_list_operation(
             handler_id="add-shopping-list-item",
@@ -928,6 +929,7 @@ class AnyListClient:
             quantity=quantity,
             details=details,
             category=category,
+            category_match_id=category,
         )
         operation = _pb_list_operation(
             handler_id="update-list-item",

@@ -1,6 +1,7 @@
 """Tests for AnyList integration initialization."""
 import importlib.util
 import sys
+from types import SimpleNamespace
 
 
 def test_const_values():
@@ -42,6 +43,16 @@ def _load_client_module():
     sys.modules[spec.name] = client
     spec.loader.exec_module(client)
     return client
+
+
+def _load_category_module():
+    """Load category.py directly to avoid homeassistant dependency."""
+    spec = importlib.util.spec_from_file_location(
+        "category", "custom_components/anylist/category.py"
+    )
+    category = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(category)
+    return category
 
 
 def test_local_client_import():
@@ -112,3 +123,109 @@ def test_local_client_parses_shopping_list_response():
     assert lists[0].name == "Groceries"
     assert lists[0].items[0].name == "Milk"
     assert lists[0].items[0].quantity == "2"
+
+
+def test_category_resolver_uses_target_list_match():
+    """Test category resolution from a matching item on the target list."""
+    category = _load_category_module()
+    shopping_lists = [
+        SimpleNamespace(
+            id="list1",
+            items=[SimpleNamespace(name="  Organic   Milk ", category="Dairy")],
+        )
+    ]
+
+    assert (
+        category.resolve_category_for_item("organic milk", "list1", shopping_lists, [])
+        == "Dairy"
+    )
+
+
+def test_category_resolver_falls_back_to_linked_favourites():
+    """Test category resolution from favourites linked to the target list."""
+    category = _load_category_module()
+    favourites = [
+        SimpleNamespace(
+            shopping_list_id="list1",
+            items=[SimpleNamespace(name="Milk", category="Dairy")],
+        )
+    ]
+
+    assert category.resolve_category_for_item("milk", "list1", [], favourites) == "Dairy"
+
+
+def test_category_resolver_ignores_unrelated_favourites():
+    """Test favourites for other shopping lists are ignored."""
+    category = _load_category_module()
+    favourites = [
+        SimpleNamespace(
+            shopping_list_id="list2",
+            items=[SimpleNamespace(name="Milk", category="Dairy")],
+        )
+    ]
+
+    assert category.resolve_category_for_item("milk", "list1", [], favourites) is None
+
+
+def test_category_resolver_returns_none_without_match():
+    """Test no category is returned when no known item matches."""
+    category = _load_category_module()
+    shopping_lists = [
+        SimpleNamespace(
+            id="list1",
+            items=[SimpleNamespace(name="Bread", category="Bakery")],
+        )
+    ]
+
+    assert category.resolve_category_for_item("milk", "list1", shopping_lists, []) is None
+
+
+def test_category_resolver_returns_none_for_conflicting_categories():
+    """Test ambiguous category matches are not guessed."""
+    category = _load_category_module()
+    shopping_lists = [
+        SimpleNamespace(
+            id="list1",
+            items=[
+                SimpleNamespace(name="Milk", category="Dairy"),
+                SimpleNamespace(name="milk", category="Other"),
+            ],
+        )
+    ]
+    favourites = [
+        SimpleNamespace(
+            shopping_list_id="list1",
+            items=[SimpleNamespace(name="Milk", category="Dairy")],
+        )
+    ]
+
+    assert (
+        category.resolve_category_for_item("milk", "list1", shopping_lists, favourites)
+        is None
+    )
+
+
+def test_local_client_add_item_writes_category_match_id():
+    """Test category adds include category and category_match_id fields."""
+    client_module = _load_client_module()
+    client = client_module.AnyListClient(
+        access_token="access",
+        refresh_token="refresh",
+        user_id="user1",
+        is_premium_user=False,
+        client_identifier="client1",
+    )
+    captured = {}
+    client.post = lambda path, body: captured.update({"path": path, "body": body})
+
+    item = client.add_item_with_details("list1", "Milk", category="Dairy")
+
+    assert item.category == "Dairy"
+    assert captured["path"] == "data/shopping-lists/update"
+    operation_list_fields = client_module._parse_fields(captured["body"])
+    operation = client_module._first_value(operation_list_fields, 1)
+    operation_fields = client_module._parse_fields(operation)
+    list_item = client_module._first_value(operation_fields, 6)
+    item_fields = client_module._parse_fields(list_item)
+    assert client_module._first_string(item_fields, 11) == "Dairy"
+    assert client_module._first_string(item_fields, 13) == "Dairy"
