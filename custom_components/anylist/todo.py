@@ -199,14 +199,14 @@ class AnyListTodoEntity(CoordinatorEntity, TodoListEntity):
                 existing_item.uid,
             )
         else:
-            category = resolve_category_for_item(
+            category_resolution = resolve_category_for_item(
                 item.summary,
                 self._list_id,
                 self.coordinator.data.get("lists", []),
                 self.coordinator.data.get("favourites", []),
             )
 
-            if not item.description and category is None:
+            if not item.description and category_resolution is None:
                 await self._async_call_client(
                     "create todo item",
                     self._client.add_item,
@@ -223,7 +223,12 @@ class AnyListTodoEntity(CoordinatorEntity, TodoListEntity):
                 item.summary,
                 None,  # quantity
                 item.description,  # details
-                category,
+                category_resolution.category if category_resolution else None,
+                (
+                    category_resolution.category_assignment
+                    if category_resolution
+                    else None
+                ),
             )
         await self.coordinator.async_request_refresh()
 
