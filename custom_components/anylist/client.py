@@ -169,25 +169,6 @@ class ICalendarInfo:
     token: str | None = None
 
 
-class NoopRealtimeSync:
-    """Safe realtime stub used when websocket sync is intentionally disabled."""
-
-    def state(self) -> str:
-        """Return a closed state."""
-        return "Closed"
-
-    def is_connected(self) -> bool:
-        """Return whether the stub is connected."""
-        return False
-
-    def poll_events(self) -> list[Any]:
-        """Return no realtime events."""
-        return []
-
-    def disconnect(self) -> None:
-        """Disconnect the stub."""
-
-
 async def async_call_with_timeout(
     hass: Any,
     func: Callable[..., _T],
@@ -1248,16 +1229,6 @@ class AnyListClient:
             url=f"https://icalendar.anylist.com/{token}.ics" if token else None,
             token=token,
         )
-
-    def start_realtime_sync(self) -> NoopRealtimeSync:
-        """Return a safe realtime no-op.
-
-        Realtime websocket support is intentionally disabled in this local
-        client. The integration uses coordinator polling as the reliable update
-        path.
-        """
-        _LOGGER.debug("AnyList realtime sync is disabled; using polling fallback")
-        return NoopRealtimeSync()
 
     def get_user_data(self) -> bytes:
         """Get raw user data from AnyList."""

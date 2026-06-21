@@ -19,11 +19,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Coor
 
 from .category import resolve_category_for_item
 from .client import async_call_with_timeout
-from .const import (
-    ANYLIST_REQUEST_TIMEOUT,
-    CONF_SELECTED_LISTS,
-    DOMAIN,
-)
+from .const import ANYLIST_REQUEST_TIMEOUT, CONF_SELECTED_LISTS, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -285,7 +281,12 @@ class AnyListTodoEntity(CoordinatorEntity, TodoListEntity):
         except Exception as err:
             _LOGGER.warning("AnyList todo mutation failed: %s: %s", action, err)
             raise HomeAssistantError(
-                f"AnyList todo mutation failed: {action}: {err}"
+                translation_domain=DOMAIN,
+                translation_key="todo_mutation_failed",
+                translation_placeholders={
+                    "action": action,
+                    "error": str(err),
+                },
             ) from err
         _LOGGER.debug("AnyList todo mutation succeeded: %s", action)
 

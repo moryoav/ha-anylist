@@ -3,6 +3,7 @@ rules:
   appropriate-polling: done
   brands: done
   common-modules: done
+  config-flow-test-coverage: done
   config-flow: done
   dependency-transparency: done
   docs-actions: done
@@ -28,6 +29,7 @@ rules:
   log-when-unavailable: done
   parallel-updates: done
   reauthentication-flow: done
+  test-coverage: done
 
   devices: done
   diagnostics: done
@@ -71,12 +73,6 @@ rules:
   inject-websession:
     status: exempt
     comment: The bundled client uses urllib for multipart protobuf requests and has no aiohttp web session to inject.
-  config-flow-test-coverage:
-    status: todo
-    comment: Add Home Assistant pytest coverage for user, options, reauth, and reconfigure flows before claiming platinum-level confidence.
-  test-coverage:
-    status: todo
-    comment: Existing tests cover the local client subset; broad Home Assistant integration coverage remains to be added.
   strict-typing:
     status: todo
     comment: Type annotations are present, but strict project-wide pyright/mypy coverage is not yet enforced.

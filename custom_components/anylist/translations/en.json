@@ -116,6 +116,12 @@
     "refresh_timed_out": {
       "message": "Timed out refreshing AnyList data."
     },
+    "refresh_failed": {
+      "message": "Failed to refresh AnyList data: {error}"
+    },
+    "todo_mutation_failed": {
+      "message": "Failed to update AnyList todo item while trying to {action}: {error}"
+    },
     "recipes_load_failed": {
       "message": "Failed to load AnyList recipes: {error}"
     },

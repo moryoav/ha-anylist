@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.4 - 2026-06-21
+
+- Fix the options flow for Home Assistant 2026.6.
+- Translate todo mutation and manual refresh failures.
+- Expand Home Assistant integration tests above the Gold quality-scale coverage
+  threshold.
+- Remove unused realtime sync scaffolding; polling remains the supported update
+  path.
+
 ## 0.4.3 - 2026-06-21
 
 - Document automatic AnyList category reuse for items added from Home Assistant.

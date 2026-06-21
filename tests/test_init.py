@@ -19,7 +19,6 @@ def test_const_values():
     assert const.CONF_MEAL_PLAN_CALENDAR == "meal_plan_calendar"
     assert const.CONF_SELECTED_LISTS == "selected_lists"
     assert const.DATA_ICALENDAR_URL == "icalendar_url"
-    assert const.DATA_REALTIME_MANAGER == "realtime_manager"
     assert const.SERVICE_GET_RECIPES == "get_recipes"
     assert const.SERVICE_GET_RECIPE == "get_recipe"
     assert const.SERVICE_ADD_RECIPE_TO_LIST == "add_recipe_to_list"
@@ -30,8 +29,6 @@ def test_const_values():
     assert const.ANYLIST_LOGIN_TIMEOUT == 20
     assert const.ANYLIST_REFRESH_TIMEOUT == 30
     assert const.ANYLIST_POLL_INTERVAL == 60
-    assert const.REALTIME_EVENT_POLL_INTERVAL == 1
-    assert const.REALTIME_REFRESH_DEBOUNCE == 1
 
 
 def _load_client_module():
@@ -72,7 +69,6 @@ def test_local_client_import():
     assert hasattr(AnyListClient, "update_recipe")
     assert hasattr(AnyListClient, "delete_recipe")
     assert hasattr(AnyListClient, "add_recipe_to_list")
-    assert hasattr(AnyListClient, "start_realtime_sync")
     assert client.Ingredient is not None
     assert client.Recipe is not None
 
@@ -204,6 +200,33 @@ def test_category_resolver_returns_none_without_match():
             id="list1",
             items=[SimpleNamespace(name="Bread", category="Bakery")],
         )
+    ]
+
+    assert category.resolve_category_for_item("milk", "list1", shopping_lists, []) is None
+
+
+def test_category_resolver_ignores_empty_inputs():
+    """Test category resolution ignores empty names and categories."""
+    category = _load_category_module()
+    assert category.normalize_item_name(None) == ""
+    assert category.resolve_category_for_item(None, "list1", [], []) is None
+
+    shopping_lists = [
+        SimpleNamespace(
+            id="list2",
+            category_assignments=[
+                SimpleNamespace(item_name="milk", category_match_id="dairy")
+            ],
+            items=[SimpleNamespace(name="milk", category=None)],
+        ),
+        SimpleNamespace(
+            id="list1",
+            category_assignments=[
+                SimpleNamespace(item_name="bread", category_match_id="bakery"),
+                SimpleNamespace(item_name="milk", category_match_id=None, category_name=None),
+            ],
+            items=[SimpleNamespace(name="milk", category=None)],
+        ),
     ]
 
     assert category.resolve_category_for_item("milk", "list1", shopping_lists, []) is None

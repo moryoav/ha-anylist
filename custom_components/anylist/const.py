@@ -11,17 +11,12 @@ CONF_SELECTED_LISTS = "selected_lists"
 DATA_CLIENT = "client"
 DATA_COORDINATOR = "coordinator"
 DATA_ICALENDAR_URL = "icalendar_url"
-DATA_REALTIME_MANAGER = "realtime_manager"
 
 # Update intervals
 ANYLIST_REQUEST_TIMEOUT = 15  # seconds
 ANYLIST_LOGIN_TIMEOUT = 20  # seconds
 ANYLIST_REFRESH_TIMEOUT = 30  # seconds
 ANYLIST_POLL_INTERVAL = 60  # seconds
-REALTIME_EVENT_POLL_INTERVAL = 1  # seconds
-REALTIME_REFRESH_DEBOUNCE = 1  # seconds
-REALTIME_RECONNECT_INITIAL_DELAY = 5  # seconds
-REALTIME_RECONNECT_MAX_DELAY = 60  # seconds
 
 # Services
 SERVICE_REFRESH = "refresh"

@@ -286,15 +286,14 @@ class AnyListConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         config_entry: config_entries.ConfigEntry,
     ) -> config_entries.OptionsFlow:
         """Get the options flow for this handler."""
-        return AnyListOptionsFlowHandler(config_entry)
+        return AnyListOptionsFlowHandler()
 
 
 class AnyListOptionsFlowHandler(config_entries.OptionsFlow):
     """Handle AnyList options."""
 
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+    def __init__(self) -> None:
         """Initialize options flow."""
-        self.config_entry = config_entry
         self._available_lists: list[tuple[str, str]] = []
 
     async def async_step_init(
