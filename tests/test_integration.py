@@ -298,6 +298,83 @@ async def test_todo_entity_items_and_mutations(hass: HomeAssistant) -> None:
     assert entity.name == "Groceries"
 
 
+async def test_todo_entity_groups_items_by_native_categories(
+    hass: HomeAssistant,
+) -> None:
+    """Test todo attributes expose items grouped by native AnyList categories."""
+    shopping_list = fake_list(
+        "list-1",
+        "Groceries",
+        categories=[
+            SimpleNamespace(id="category-dairy", match_id="dairy", name="Dairy"),
+            SimpleNamespace(id="category-produce", match_id="produce", name="Produce"),
+        ],
+        category_assignments=[
+            SimpleNamespace(
+                item_name="foil",
+                category_match_id="kitchen",
+                category_name="Kitchen",
+            )
+        ],
+        items=[
+            fake_item("item-1", "Milk", category="dairy"),
+            fake_item("item-2", "Apples", category="category-produce", is_checked=True),
+            fake_item(
+                "item-3",
+                "Bread",
+                category_assignment=SimpleNamespace(category_name="Bakery"),
+            ),
+            fake_item("item-4", "Foil"),
+        ],
+    )
+    coordinator = FakeCoordinator({"lists": [shopping_list], "favourites": []})
+    entity = AnyListTodoEntity(
+        coordinator,
+        FakeAnyListClient(lists=[shopping_list]),
+        shopping_list,
+        _mock_entry(),
+    )
+    entity.hass = hass
+
+    attrs = entity.extra_state_attributes
+
+    assert attrs["items_signature_raw"] == (
+        "apples|completed,bread|needs_action,foil|needs_action,milk|needs_action"
+    )
+    assert len(attrs["items_by_category_signature"]) == 64
+    assert attrs["items_by_category"] == [
+        {
+            "name": "Dairy",
+            "items": [
+                {"uid": "item-1", "name": "Milk", "status": "needs_action"},
+            ],
+        },
+        {
+            "name": "Produce",
+            "items": [
+                {"uid": "item-2", "name": "Apples", "status": "completed"},
+            ],
+        },
+        {
+            "name": "Bakery",
+            "items": [
+                {"uid": "item-3", "name": "Bread", "status": "needs_action"},
+            ],
+        },
+        {
+            "name": "Uncategorized",
+            "items": [
+                {"uid": "item-4", "name": "Foil", "status": "needs_action"},
+            ],
+        },
+    ]
+
+    previous_signature = attrs["items_by_category_signature"]
+    shopping_list.items[0].is_checked = True
+
+    assert entity.extra_state_attributes["items_by_category_signature"] != previous_signature
+
+
 async def test_todo_entity_mutation_errors_are_translated(
     hass: HomeAssistant,
 ) -> None:

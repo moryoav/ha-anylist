@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.5 - 2026-07-06
+
+- Expose AnyList todo items grouped by their native AnyList categories for
+  dashboard aisle displays.
+
 ## 0.4.4 - 2026-06-21
 
 - Fix the options flow for Home Assistant 2026.6.

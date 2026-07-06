@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
+from typing import Any
 
 from homeassistant.components.todo import (
     TodoItem,
@@ -140,19 +142,23 @@ class AnyListTodoEntity(CoordinatorEntity, TodoListEntity):
         return items
 
     @property
-    def extra_state_attributes(self) -> dict[str, str]:
+    def extra_state_attributes(self) -> dict[str, Any]:
         """Return dynamic attributes for the todo entity."""
         entries: list[str] = []
+        items_by_category: list[dict[str, Any]] = []
 
         for shopping_list in self.coordinator.data.get("lists", []):
             if shopping_list.id != self._list_id:
                 continue
 
+            groups: dict[str, list[dict[str, str]]] = {}
+            group_order = self._category_order(shopping_list)
+
             for item in shopping_list.items:
-                name = str(
+                display_name = str(
                     getattr(item, "name", None) or getattr(item, "summary", "")
-                ).strip().lower()
-                if not name:
+                ).strip()
+                if not display_name:
                     continue
 
                 completed = bool(
@@ -160,17 +166,93 @@ class AnyListTodoEntity(CoordinatorEntity, TodoListEntity):
                     or getattr(item, "is_checked", False)
                 )
                 status = "completed" if completed else "needs_action"
-                entries.append(f"{name}|{status}")
+                entries.append(f"{display_name.lower()}|{status}")
+
+                category_name = self._native_category_name(shopping_list, item)
+                if category_name is None:
+                    category_name = "Uncategorized"
+
+                if category_name not in groups:
+                    groups[category_name] = []
+                    if category_name not in group_order:
+                        group_order.append(category_name)
+
+                groups[category_name].append(
+                    {
+                        "uid": str(
+                            getattr(item, "id", None)
+                            or getattr(item, "uid", None)
+                            or display_name
+                        ),
+                        "name": display_name,
+                        "status": status,
+                    }
+                )
+
+            if "Uncategorized" in group_order:
+                group_order = [
+                    name for name in group_order if name != "Uncategorized"
+                ] + ["Uncategorized"]
+
+            items_by_category = [
+                {
+                    "name": category_name,
+                    "items": groups[category_name],
+                }
+                for category_name in group_order
+                if groups.get(category_name)
+            ]
             break
 
         items_signature_raw = ",".join(sorted(entries))
+        items_by_category_raw = json.dumps(
+            items_by_category,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
 
         return {
             "items_signature": hashlib.sha256(
                 items_signature_raw.encode("utf-8")
             ).hexdigest(),
             "items_signature_raw": items_signature_raw,
+            "items_by_category": items_by_category,
+            "items_by_category_signature": hashlib.sha256(
+                items_by_category_raw.encode("utf-8")
+            ).hexdigest(),
         }
+
+    def _category_order(self, shopping_list: Any) -> list[str]:
+        """Return AnyList category names in list order."""
+        order: list[str] = []
+        for category in getattr(shopping_list, "categories", []):
+            name = str(getattr(category, "name", "") or "").strip()
+            if name and name not in order:
+                order.append(name)
+        return order
+
+    def _native_category_name(self, shopping_list: Any, item: Any) -> str | None:
+        """Return the category name AnyList exposes for an item."""
+        category_assignment = getattr(item, "category_assignment", None)
+        category_name = str(
+            getattr(category_assignment, "category_name", "") or ""
+        ).strip()
+        if category_name:
+            return category_name
+
+        category_value = str(getattr(item, "category", "") or "").strip()
+        if not category_value:
+            return None
+
+        for category in getattr(shopping_list, "categories", []):
+            for attr in ("id", "match_id", "name"):
+                value = str(getattr(category, attr, "") or "").strip()
+                if value and value == category_value:
+                    name = str(getattr(category, "name", "") or "").strip()
+                    return name or None
+
+        return None
 
     async def async_create_todo_item(self, item: TodoItem) -> None:
         """Add a new item to the list.

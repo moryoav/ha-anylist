@@ -233,6 +233,7 @@ def fake_list(
     name: str = "Groceries",
     *,
     items: list[Any] | None = None,
+    categories: list[Any] | None = None,
     category_assignments: list[Any] | None = None,
 ) -> Any:
     """Return a fake AnyList shopping list."""
@@ -240,7 +241,7 @@ def fake_list(
         id=list_id,
         name=name,
         items=items if items is not None else [fake_item()],
-        categories=[],
+        categories=categories if categories is not None else [],
         category_assignments=category_assignments if category_assignments is not None else [],
     )
 
