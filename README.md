@@ -20,11 +20,12 @@ AnyList is a shared grocery list and meal planning service. This integration bri
 
 [![Open the AnyList HACS repository](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=moryoav&repository=ha-anylist&category=integration)
 
-1. Open HACS in Home Assistant.
-2. Add `https://github.com/moryoav/ha-anylist` as an integration custom repository until this repository is accepted as a HACS default.
-3. Search for **AnyList** and install it.
-4. Restart Home Assistant.
-5. Add the integration from **Settings** -> **Devices & services** -> **Add integration** -> **AnyList**.
+AnyList is available in the default HACS catalog, so no custom repository setup is required.
+
+1. Select the button above, or open HACS and search for **AnyList** under **Integrations**.
+2. Select **AnyList** and choose **Download**.
+3. Restart Home Assistant.
+4. Add the integration from **Settings** -> **Devices & services** -> **Add integration** -> **AnyList**.
 
 ### Manual
 
@@ -181,7 +182,7 @@ This project is unofficial and is not affiliated with or endorsed by AnyList or 
 
 MIT
 
-[hacs-badge]: https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=flat-square
+[hacs-badge]: https://img.shields.io/badge/HACS-Default-41BDF5.svg?style=flat-square
 [hacs-url]: https://github.com/hacs/integration
 [release-badge]: https://img.shields.io/github/v/release/moryoav/ha-anylist?style=flat-square
 [release-url]: https://github.com/moryoav/ha-anylist/releases
