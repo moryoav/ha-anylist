@@ -185,7 +185,10 @@ class FakeCoordinator:
         """Initialize the fake coordinator."""
         self.data = data if data is not None else {"lists": [fake_list()], "favourites": []}
         self.last_update_success = True
+        self.last_exception: Exception | None = None
         self.refresh_count = 0
+        self.forced_refresh_count = 0
+        self.request_refresh_count = 0
         self._listeners: list[Any] = []
         self._refresh_error = refresh_error
 
@@ -201,6 +204,14 @@ class FakeCoordinator:
     async def async_request_refresh(self) -> None:
         """Record a refresh request."""
         self.refresh_count += 1
+        self.request_refresh_count += 1
+        if self._refresh_error is not None:
+            raise self._refresh_error
+
+    async def async_refresh(self) -> None:
+        """Record an immediate refresh."""
+        self.refresh_count += 1
+        self.forced_refresh_count += 1
         if self._refresh_error is not None:
             raise self._refresh_error
 

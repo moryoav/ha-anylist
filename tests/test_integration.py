@@ -247,6 +247,32 @@ async def test_todo_setup_adds_dynamic_lists(hass: HomeAssistant) -> None:
     assert entities[1]._client is client
 
 
+async def test_todo_entity_availability_requires_target_list(
+    hass: HomeAssistant,
+) -> None:
+    """Test an empty target list is available but a missing target list is not."""
+    shopping_list = fake_list("list-1", "Groceries", items=[])
+    coordinator = FakeCoordinator({"lists": [shopping_list], "favourites": []})
+    entity = AnyListTodoEntity(
+        coordinator,
+        FakeAnyListClient(lists=[shopping_list]),
+        shopping_list,
+        _mock_entry(),
+    )
+    entity.hass = hass
+
+    assert entity.available
+
+    coordinator.data["lists"] = [fake_list("list-2", "Hardware Store")]
+    assert not entity.available
+
+    coordinator.data["lists"] = [shopping_list]
+    assert entity.available
+
+    coordinator.last_update_success = False
+    assert not entity.available
+
+
 async def test_todo_entity_items_and_mutations(hass: HomeAssistant) -> None:
     """Test todo entity item conversion and client mutations."""
     checked_item = fake_item("item-checked", "Eggs", is_checked=True)
@@ -647,6 +673,39 @@ async def test_refresh_entry_preserves_home_assistant_errors(
         await _async_refresh_entry(hass, entry.entry_id)
 
     assert exc_info.value.translation_key == "refresh_timed_out"
+
+
+async def test_refresh_entry_forces_immediate_refresh(hass: HomeAssistant) -> None:
+    """Test a service refresh bypasses the coordinator refresh debounce."""
+    entry = _mock_entry()
+    entry.add_to_hass(hass)
+    _, coordinator = _attach_runtime(hass, entry)
+
+    result = await _async_refresh_entry(hass, entry.entry_id)
+
+    assert result is coordinator.data
+    assert coordinator.forced_refresh_count == 1
+    assert coordinator.request_refresh_count == 0
+
+
+async def test_refresh_entry_raises_when_forced_refresh_unsuccessful(
+    hass: HomeAssistant,
+) -> None:
+    """Test a coordinator-handled update failure fails the refresh service."""
+    entry = _mock_entry()
+    entry.add_to_hass(hass)
+    coordinator = FakeCoordinator()
+    coordinator.last_update_success = False
+    coordinator.last_exception = UpdateFailed("offline")
+    _attach_runtime(hass, entry, coordinator=coordinator)
+
+    with pytest.raises(HomeAssistantError) as exc_info:
+        await _async_refresh_entry(hass, entry.entry_id)
+
+    assert exc_info.value.translation_key == "refresh_failed"
+    assert exc_info.value.translation_placeholders == {"error": "offline"}
+    assert coordinator.forced_refresh_count == 1
+    assert coordinator.request_refresh_count == 0
 
 
 async def test_fetch_data_auth_failure_raises_reauth(

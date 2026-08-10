@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.7 - 2026-08-10
+
+- Make manual refresh failures visible to Home Assistant instead of reporting
+  stale coordinator data as a successful refresh.
+- Mark a todo entity unavailable when its specific AnyList shopping list is
+  absent from refreshed data, while keeping valid empty lists available.
+
 ## 0.4.6 - 2026-08-02
 
 - Simplify HACS installation instructions now that AnyList is available in the

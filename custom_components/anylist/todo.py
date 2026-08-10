@@ -109,6 +109,14 @@ class AnyListTodoEntity(CoordinatorEntity, TodoListEntity):
         )
 
     @property
+    def available(self) -> bool:
+        """Return whether this shopping list is present in fresh coordinator data."""
+        return super().available and any(
+            getattr(shopping_list, "id", None) == self._list_id
+            for shopping_list in (self.coordinator.data or {}).get("lists", [])
+        )
+
+    @property
     def todo_items(self) -> list[TodoItem]:
         """Return the todo items for this list."""
         items = []

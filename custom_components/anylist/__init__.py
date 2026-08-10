@@ -469,7 +469,7 @@ async def _async_refresh_entry(hass: HomeAssistant, entry_id: str) -> dict[str, 
     _LOGGER.debug("AnyList refresh started for config entry %s", entry_id)
     try:
         await asyncio.wait_for(
-            coordinator.async_request_refresh(),
+            coordinator.async_refresh(),
             timeout=ANYLIST_REFRESH_TIMEOUT,
         )
     except asyncio.TimeoutError as err:
@@ -484,6 +484,18 @@ async def _async_refresh_entry(hass: HomeAssistant, entry_id: str) -> dict[str, 
         if isinstance(err, HomeAssistantError):
             raise
         raise _translated_error("refresh_failed", error=err) from err
+
+    if not coordinator.last_update_success:
+        error = coordinator.last_exception or UpdateFailed(
+            "AnyList coordinator refresh failed without an exception"
+        )
+        _LOGGER.warning(
+            "AnyList refresh failed for config entry %s: %s",
+            entry_id,
+            error,
+        )
+        raise _translated_error("refresh_failed", error=error) from error
+
     _LOGGER.debug("AnyList refresh succeeded for config entry %s", entry_id)
     return coordinator.data
 
