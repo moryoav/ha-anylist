@@ -1,6 +1,8 @@
 # AnyList for Home Assistant
 [![HACS][hacs-badge]][hacs-url] [![release][release-badge]][release-url] ![downloads][downloads-badge] [![hassfest][hassfest-badge]][hassfest-url] [![validate][validate-badge]][validate-url] [![license](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](LICENSE)
 
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/Y5B124NZ2L)
+
 A Home Assistant custom integration for [AnyList](https://www.anylist.com/) shopping lists, recipes, and meal planning.
 
 AnyList is a shared grocery list and meal planning service. This integration brings selected AnyList shopping lists into Home Assistant as todo entities, exposes a meal plan iCalendar URL for the built-in iCal integration, and provides recipe actions for automations and scripts.
