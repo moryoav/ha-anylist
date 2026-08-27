@@ -1,7 +1,15 @@
 # AnyList for Home Assistant
-[![HACS][hacs-badge]][hacs-url] [![release][release-badge]][release-url] ![downloads][downloads-badge] [![hassfest][hassfest-badge]][hassfest-url] [![validate][validate-badge]][validate-url] [![license](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](LICENSE)
+[![HACS][hacs-badge]][hacs-url] [![release][release-badge]][release-url] [![hassfest][hassfest-badge]][hassfest-url] [![validate][validate-badge]][validate-url] [![license](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](LICENSE)
+
+---
+
+## Support me on Ko-fi
+
+If this project is useful to you, you can support its continued development:
 
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/Y5B124NZ2L)
+
+---
 
 A Home Assistant custom integration for [AnyList](https://www.anylist.com/) shopping lists, recipes, and meal planning.
 
@@ -188,7 +196,6 @@ MIT
 [hacs-url]: https://github.com/hacs/integration
 [release-badge]: https://img.shields.io/github/v/release/moryoav/ha-anylist?style=flat-square
 [release-url]: https://github.com/moryoav/ha-anylist/releases
-[downloads-badge]: https://img.shields.io/github/downloads/moryoav/ha-anylist/total?style=flat-square
 [hassfest-badge]: https://img.shields.io/github/actions/workflow/status/moryoav/ha-anylist/hassfest.yaml?branch=main&style=flat-square&label=hassfest
 [hassfest-url]: https://github.com/moryoav/ha-anylist/actions/workflows/hassfest.yaml
 [validate-badge]: https://img.shields.io/github/actions/workflow/status/moryoav/ha-anylist/validate.yaml?branch=main&style=flat-square&label=validate
