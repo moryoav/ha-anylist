@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from custom_components.anylist import client as client_module
 from custom_components.anylist.todo import AnyListTodoEntity
 
 
@@ -169,3 +170,82 @@ def test_category_group_and_list_scope(category_entity) -> None:
         ),
     )]
     assert entity.extra_state_attributes["items_by_category"][0]["name"] == "Tech"
+
+
+@pytest.mark.parametrize("is_checked", [False, True], ids=["active", "completed"])
+@pytest.mark.parametrize("legacy_category", [None, "dairy"], ids=["missing", "stale"])
+def test_parsed_custom_category_is_grouped(
+    category_entity,
+    is_checked: bool,
+    legacy_category: str | None,
+) -> None:
+    """Resolve ID-only assignments from a parsed shopping-list response."""
+    # Build wire fields directly so item serialization cannot hide parser errors.
+    assignment = (
+        client_module._field_string(1, "assignment-1")
+        + client_module._field_string(2, "group-1")
+        + client_module._field_string(3, "category-tech")
+    )
+    custom_item = (
+        client_module._field_string(1, "item-1")
+        + client_module._field_string(4, "Category test")
+        + client_module._field_bool(6, is_checked)
+        + client_module._field_string(13, legacy_category)
+        + client_module._field_message(20, assignment)
+    )
+    builtin_item = (
+        client_module._field_string(1, "item-2")
+        + client_module._field_string(4, "Milk")
+        + client_module._field_string(13, "dairy")
+    )
+    shopping_list_data = (
+        client_module._field_string(1, "list-1")
+        + client_module._field_string(3, "Groceries")
+        + client_module._field_message(4, custom_item)
+        + client_module._field_message(4, builtin_item)
+    )
+    category_group = client_module._field_string(1, "group-1")
+    for category_id, name, match_id in (
+        ("category-dairy", "Dairy", "dairy"),
+        ("category-tech", "Tech", None),
+    ):
+        category_group += client_module._field_message(
+            5,
+            client_module._field_string(1, category_id)
+            + client_module._field_string(5, name)
+            + client_module._field_string(6, match_id),
+        )
+    category_data = (
+        client_module._field_string(1, "list-1")
+        + client_module._field_message(
+            7, client_module._field_message(1, category_group)
+        )
+    )
+    response = (
+        client_module._field_message(1, shopping_list_data)
+        + client_module._field_message(6, category_data)
+    )
+    shopping_lists = client_module._parse_shopping_lists_response(response)
+    parsed_assignment = shopping_lists[0].items[0].category_assignment
+    assert parsed_assignment is not None
+    assert parsed_assignment.category_name is None
+
+    entity, _ = category_entity
+    entity.coordinator.data["lists"] = shopping_lists
+
+    assert entity.extra_state_attributes["items_by_category"] == [
+        {
+            "name": "Dairy",
+            "items": [{"uid": "item-2", "name": "Milk", "status": "needs_action"}],
+        },
+        {
+            "name": "Tech",
+            "items": [
+                {
+                    "uid": "item-1",
+                    "name": "Category test",
+                    "status": "completed" if is_checked else "needs_action",
+                }
+            ],
+        },
+    ]

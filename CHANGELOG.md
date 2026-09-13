@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.8 - 2026-09-13
+
+- Fix items assigned to newly created AnyList categories appearing under
+  Uncategorized, including completed items, while preserving built-in category
+  grouping.
+
 ## 0.4.7 - 2026-08-10
 
 - Make manual refresh failures visible to Home Assistant instead of reporting
