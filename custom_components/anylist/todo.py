@@ -249,6 +249,26 @@ class AnyListTodoEntity(CoordinatorEntity, TodoListEntity):
         if category_name:
             return category_name
 
+        # Inline assignments carry IDs without a resolved category name.
+        category_id = str(
+            getattr(category_assignment, "category_id", "") or ""
+        ).strip()
+        category_group_id = getattr(category_assignment, "category_group_id", None)
+        assignment_list_id = getattr(category_assignment, "list_id", None)
+        if category_id and (
+            not assignment_list_id or assignment_list_id == shopping_list.id
+        ):
+            for category in getattr(shopping_list, "categories", []):
+                if str(getattr(category, "id", "") or "").strip() != category_id:
+                    continue
+                if category_group_id and (
+                    getattr(category, "category_group_id", None) != category_group_id
+                ):
+                    continue
+                name = str(getattr(category, "name", "") or "").strip()
+                if name:
+                    return name
+
         category_value = str(getattr(item, "category", "") or "").strip()
         if not category_value:
             return None
