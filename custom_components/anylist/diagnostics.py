@@ -9,6 +9,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
 from homeassistant.core import HomeAssistant
 
+from . import get_poll_interval
 from .const import CONF_MEAL_PLAN_CALENDAR, CONF_SELECTED_LISTS
 
 TO_REDACT = {
@@ -61,6 +62,7 @@ async def async_get_config_entry_diagnostics(
             "icalendar_url": (
                 runtime_data.icalendar_url if runtime_data is not None else None
             ),
+            "poll_interval": get_poll_interval(entry),
         },
     }
 

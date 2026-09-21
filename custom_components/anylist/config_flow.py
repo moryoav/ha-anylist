@@ -11,6 +11,9 @@ from homeassistant import config_entries
 from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
 from homeassistant.helpers.selector import (
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
     SelectOptionDict,
     SelectSelector,
     SelectSelectorConfig,
@@ -24,9 +27,13 @@ from .client import (
     async_call_with_timeout,
 )
 from .const import (
+    ANYLIST_DEFAULT_POLL_INTERVAL,
     ANYLIST_LOGIN_TIMEOUT,
+    ANYLIST_MAX_POLL_INTERVAL,
+    ANYLIST_MIN_POLL_INTERVAL,
     ANYLIST_REQUEST_TIMEOUT,
     CONF_MEAL_PLAN_CALENDAR,
+    CONF_POLL_INTERVAL,
     CONF_SELECTED_LISTS,
     DOMAIN,
 )
@@ -57,6 +64,22 @@ def _credentials_schema(
             email_key: str,
             vol.Required(CONF_PASSWORD): str,
         }
+    )
+
+
+def _poll_interval_selector() -> Any:
+    """Return the selector used for the polling interval option."""
+    return vol.All(
+        NumberSelector(
+            NumberSelectorConfig(
+                min=ANYLIST_MIN_POLL_INTERVAL,
+                max=ANYLIST_MAX_POLL_INTERVAL,
+                step=1,
+                mode=NumberSelectorMode.BOX,
+                unit_of_measurement="seconds",
+            )
+        ),
+        vol.Coerce(int),
     )
 
 
@@ -277,6 +300,10 @@ class AnyListConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema(
                 {
                     vol.Optional(CONF_MEAL_PLAN_CALENDAR, default=False): bool,
+                    vol.Optional(
+                        CONF_POLL_INTERVAL,
+                        default=ANYLIST_DEFAULT_POLL_INTERVAL,
+                    ): _poll_interval_selector(),
                 }
             ),
         )
@@ -347,6 +374,13 @@ class AnyListOptionsFlowHandler(config_entries.OptionsFlow):
             CONF_MEAL_PLAN_CALENDAR,
             default=_entry_option(self.config_entry, CONF_MEAL_PLAN_CALENDAR, False),
         )] = bool
+
+        schema_dict[vol.Optional(
+            CONF_POLL_INTERVAL,
+            default=_entry_option(
+                self.config_entry, CONF_POLL_INTERVAL, ANYLIST_DEFAULT_POLL_INTERVAL
+            ),
+        )] = _poll_interval_selector()
 
         return self.async_show_form(
             step_id="init",

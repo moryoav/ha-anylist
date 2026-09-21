@@ -18,6 +18,7 @@ def test_const_values():
     assert const.CONF_PASSWORD == "password"
     assert const.CONF_MEAL_PLAN_CALENDAR == "meal_plan_calendar"
     assert const.CONF_SELECTED_LISTS == "selected_lists"
+    assert const.CONF_POLL_INTERVAL == "poll_interval"
     assert const.DATA_ICALENDAR_URL == "icalendar_url"
     assert const.SERVICE_GET_RECIPES == "get_recipes"
     assert const.SERVICE_GET_RECIPE == "get_recipe"
@@ -28,7 +29,9 @@ def test_const_values():
     assert const.ANYLIST_REQUEST_TIMEOUT == 15
     assert const.ANYLIST_LOGIN_TIMEOUT == 20
     assert const.ANYLIST_REFRESH_TIMEOUT == 30
-    assert const.ANYLIST_POLL_INTERVAL == 60
+    assert const.ANYLIST_DEFAULT_POLL_INTERVAL == 60
+    assert const.ANYLIST_MIN_POLL_INTERVAL == 60
+    assert const.ANYLIST_MAX_POLL_INTERVAL == 3600
 
 
 def _load_client_module():

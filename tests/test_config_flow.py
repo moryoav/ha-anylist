@@ -4,15 +4,19 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
 from homeassistant.config_entries import SOURCE_REAUTH, SOURCE_RECONFIGURE, SOURCE_USER
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
 from homeassistant.core import HomeAssistant
-from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.data_entry_flow import FlowResultType, InvalidData
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.anylist.client import AnyListAuthError, AnyListHTTPError
 from custom_components.anylist.const import (
+    ANYLIST_DEFAULT_POLL_INTERVAL,
     CONF_MEAL_PLAN_CALENDAR,
+    CONF_POLL_INTERVAL,
     CONF_SELECTED_LISTS,
     DOMAIN,
 )
@@ -62,7 +66,7 @@ async def test_user_flow_success(hass: HomeAssistant) -> None:
 
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"],
-            {CONF_MEAL_PLAN_CALENDAR: True},
+            {CONF_MEAL_PLAN_CALENDAR: True, CONF_POLL_INTERVAL: 120},
         )
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
@@ -71,6 +75,7 @@ async def test_user_flow_success(hass: HomeAssistant) -> None:
     assert result["options"] == {
         CONF_SELECTED_LISTS: ["list-1"],
         CONF_MEAL_PLAN_CALENDAR: True,
+        CONF_POLL_INTERVAL: 120,
     }
 
 
@@ -189,6 +194,7 @@ async def test_options_flow_success(hass: HomeAssistant) -> None:
         {
             CONF_SELECTED_LISTS: ["list-1", "list-2"],
             CONF_MEAL_PLAN_CALENDAR: True,
+            CONF_POLL_INTERVAL: 300,
         },
     )
 
@@ -196,7 +202,48 @@ async def test_options_flow_success(hass: HomeAssistant) -> None:
     assert result["data"] == {
         CONF_SELECTED_LISTS: ["list-1", "list-2"],
         CONF_MEAL_PLAN_CALENDAR: True,
+        CONF_POLL_INTERVAL: 300,
     }
+
+
+async def test_options_flow_poll_interval_defaults_and_bounds(
+    hass: HomeAssistant,
+) -> None:
+    """Test the poll interval defaults to the stored value and rejects bad input."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=USER_INPUT,
+        options={CONF_SELECTED_LISTS: ["list-1"]},
+        unique_id="user-1",
+    )
+    entry.add_to_hass(hass)
+    entry.runtime_data = type(
+        "RuntimeData",
+        (),
+        {"client": FakeAnyListClient(lists=[fake_list("list-1", "Groceries")])},
+    )()
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    poll_interval_key = next(
+        key
+        for key in result["data_schema"].schema
+        if key.schema == CONF_POLL_INTERVAL
+    )
+    assert poll_interval_key.default() == ANYLIST_DEFAULT_POLL_INTERVAL
+
+    with pytest.raises(InvalidData):
+        await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            {CONF_SELECTED_LISTS: ["list-1"], CONF_POLL_INTERVAL: 1},
+        )
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {CONF_SELECTED_LISTS: ["list-1"], CONF_POLL_INTERVAL: 120},
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_POLL_INTERVAL] == 120
 
 
 async def test_options_flow_handles_list_fetch_failure(hass: HomeAssistant) -> None:

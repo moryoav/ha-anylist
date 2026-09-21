@@ -28,10 +28,12 @@
         "title": "AnyList Options",
         "description": "Configure additional features for your AnyList integration.",
         "data": {
-          "meal_plan_calendar": "Enable Meal Plan Calendar URL"
+          "meal_plan_calendar": "Enable Meal Plan Calendar URL",
+          "poll_interval": "Polling Interval"
         },
         "data_description": {
-          "meal_plan_calendar": "Expose a diagnostic sensor containing the AnyList meal plan iCalendar URL."
+          "meal_plan_calendar": "Expose a diagnostic sensor containing the AnyList meal plan iCalendar URL.",
+          "poll_interval": "How often to poll AnyList for changes, in seconds (60 to 3600). Lower values update faster but make more cloud requests."
         }
       },
       "reauth_confirm": {
@@ -69,11 +71,13 @@
         "description": "Configure which lists and features are enabled.",
         "data": {
           "selected_lists": "Shopping Lists",
-          "meal_plan_calendar": "Enable Meal Plan Calendar URL"
+          "meal_plan_calendar": "Enable Meal Plan Calendar URL",
+          "poll_interval": "Polling Interval"
         },
         "data_description": {
           "selected_lists": "The AnyList shopping lists to expose as Home Assistant todo entities.",
-          "meal_plan_calendar": "Expose a diagnostic sensor containing the AnyList meal plan iCalendar URL."
+          "meal_plan_calendar": "Expose a diagnostic sensor containing the AnyList meal plan iCalendar URL.",
+          "poll_interval": "How often to poll AnyList for changes, in seconds (60 to 3600). Lower values update faster but make more cloud requests."
         }
       }
     }
