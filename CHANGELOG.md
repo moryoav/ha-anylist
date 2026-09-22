@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.0 - 2026-09-22
+
+- Add a configurable polling interval from 60 to 3600 seconds during setup and
+  in integration options, keeping the 60-second default. Thanks to
+  [@kevdliu](https://github.com/kevdliu) for [PR #4](https://github.com/moryoav/ha-anylist/pull/4).
+- Preserve selected shopping lists when changing options while AnyList is
+  unavailable, and safely handle invalid saved polling intervals.
+- Include the polling interval in diagnostics and update the configuration and
+  shopping list synchronization guides.
+
 ## 0.6.0 - 2026-09-20
 
 - Add `anylist.search_recipes` with local word matching, Unicode normalization,

@@ -35,9 +35,11 @@ from .client import (
     async_call_with_timeout,
 )
 from .const import (
+    ANYLIST_DEFAULT_POLL_INTERVAL,
     ANYLIST_LOGIN_TIMEOUT,
+    ANYLIST_MAX_POLL_INTERVAL,
+    ANYLIST_MIN_POLL_INTERVAL,
     ANYLIST_PHOTO_TIMEOUT,
-    ANYLIST_POLL_INTERVAL,
     ANYLIST_REFRESH_TIMEOUT,
     ANYLIST_REQUEST_TIMEOUT,
     ATTR_CONFIG_ENTRY_ID,
@@ -60,6 +62,7 @@ from .const import (
     CONF_EMAIL,
     CONF_MEAL_PLAN_CALENDAR,
     CONF_PASSWORD,
+    CONF_POLL_INTERVAL,
     CONF_SELECTED_LISTS,
     DOMAIN,
     SERVICE_ADD_RECIPE_TO_LIST,
@@ -206,6 +209,29 @@ DELETE_RECIPE_SERVICE_SCHEMA = vol.Schema(
 def _entry_option(entry: ConfigEntry, key: str, default: Any = None) -> Any:
     """Return an option value, falling back to legacy data storage."""
     return entry.options.get(key, entry.data.get(key, default))
+
+
+def get_poll_interval(entry: ConfigEntry) -> int:
+    """Return the configured polling interval in seconds, clamped to safe bounds."""
+    value = _entry_option(entry, CONF_POLL_INTERVAL, ANYLIST_DEFAULT_POLL_INTERVAL)
+    try:
+        interval = int(value)
+    except (TypeError, ValueError, OverflowError):
+        _LOGGER.warning(
+            "Invalid AnyList poll interval %r, using %s seconds",
+            value,
+            ANYLIST_DEFAULT_POLL_INTERVAL,
+        )
+        return ANYLIST_DEFAULT_POLL_INTERVAL
+
+    clamped = min(max(interval, ANYLIST_MIN_POLL_INTERVAL), ANYLIST_MAX_POLL_INTERVAL)
+    if clamped != interval:
+        _LOGGER.warning(
+            "AnyList poll interval %s seconds is out of range, using %s seconds",
+            interval,
+            clamped,
+        )
+    return clamped
 
 
 def get_platforms(entry: ConfigEntry) -> list[Platform]:
@@ -995,12 +1021,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         """Fetch data from AnyList."""
         return await _async_fetch_data(hass, client)
 
+    poll_interval = get_poll_interval(entry)
     coordinator = DataUpdateCoordinator(
         hass,
         _LOGGER,
         name=DOMAIN,
         update_method=async_update_data,
-        update_interval=timedelta(seconds=ANYLIST_POLL_INTERVAL),
+        update_interval=timedelta(seconds=poll_interval),
         always_update=True,
     )
 
@@ -1018,7 +1045,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _LOGGER.debug(
         "AnyList polling enabled for config entry %s every %s seconds",
         entry.entry_id,
-        ANYLIST_POLL_INTERVAL,
+        poll_interval,
     )
 
     return True

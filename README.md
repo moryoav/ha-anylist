@@ -22,7 +22,7 @@ AnyList is a shared grocery list and meal planning service. This integration bri
 - **Shopping list change signatures** for automations that need to detect renamed, added, removed, checked, or unchecked items.
 - **Meal plan iCalendar URL** as a diagnostic sensor when the option is enabled.
 - **Recipe actions** to search recipes, fetch one recipe, create/update/delete recipes, and add recipe ingredients to shopping lists.
-- **Polling sync fallback** with a safe cloud polling interval.
+- **Polling sync fallback** with a configurable cloud polling interval.
 
 ## Installation
 
@@ -58,8 +58,9 @@ Configuration options:
 
 - **Shopping Lists**: choose which AnyList shopping lists should be exposed as Home Assistant todo entities. If no explicit list selection is stored, all lists are exposed.
 - **Enable Meal Plan Calendar URL**: creates a diagnostic sensor containing the AnyList meal plan iCalendar URL.
+- **Polling Interval**: how often AnyList is polled for changes, from 60 to 3600 seconds (1 minute to 1 hour). Defaults to 60 seconds. Higher values reduce cloud requests but delay changes made by other AnyList clients.
 
-Use **Configure** on the integration entry to change selected lists or meal plan URL exposure. Use **Reconfigure** to update account credentials.
+Use **Configure** on the integration entry to change selected lists, meal plan URL exposure, or the polling interval. Use **Reconfigure** to update account credentials.
 
 ## Supported Functionality
 
@@ -102,7 +103,7 @@ See [custom_components/anylist/services.yaml](custom_components/anylist/services
 
 ## Data Updates
 
-The integration uses Home Assistant's `DataUpdateCoordinator` and polls AnyList every 60 seconds. Mutations such as adding, checking, deleting, or recipe-to-list actions request an immediate refresh after the AnyList operation completes.
+The integration uses Home Assistant's `DataUpdateCoordinator` and polls AnyList every 60 seconds by default. Set **Polling Interval** in the integration options to configure the polling interval to a custom value. Mutations such as adding, checking, deleting, or recipe-to-list actions request an immediate refresh after the AnyList operation completes.
 
 If AnyList is unavailable, entities are marked unavailable through the coordinator until the next successful refresh.
 
@@ -285,7 +286,7 @@ Confirm that the email and password work in the official AnyList app or website.
 
 ### Lists Do Not Update Immediately
 
-The integration polls AnyList every 60 seconds. Local mutations request a refresh immediately, but changes made in another AnyList client may take up to one polling interval to appear.
+The integration polls AnyList every 60 seconds by default. Local mutations request a refresh immediately, but changes made in another AnyList client may take up to one polling interval to appear.
 
 ### Missing Shopping List
 

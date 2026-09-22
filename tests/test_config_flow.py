@@ -4,15 +4,19 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
 from homeassistant.config_entries import SOURCE_REAUTH, SOURCE_RECONFIGURE, SOURCE_USER
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
 from homeassistant.core import HomeAssistant
-from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.data_entry_flow import FlowResultType, InvalidData
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.anylist.client import AnyListAuthError, AnyListHTTPError
 from custom_components.anylist.const import (
+    ANYLIST_DEFAULT_POLL_INTERVAL,
     CONF_MEAL_PLAN_CALENDAR,
+    CONF_POLL_INTERVAL,
     CONF_SELECTED_LISTS,
     DOMAIN,
 )
@@ -26,7 +30,8 @@ USER_INPUT = {
 }
 
 
-async def test_user_flow_success(hass: HomeAssistant) -> None:
+@pytest.mark.parametrize("poll_interval", [None, 60, 120, 3600])
+async def test_user_flow_success(hass: HomeAssistant, poll_interval: int | None) -> None:
     """Test a complete user config flow."""
     client = FakeAnyListClient(
         lists=[
@@ -60,9 +65,12 @@ async def test_user_flow_success(hass: HomeAssistant) -> None:
         assert result["type"] is FlowResultType.FORM
         assert result["step_id"] == "options"
 
+        options = {CONF_MEAL_PLAN_CALENDAR: True}
+        if poll_interval is not None:
+            options[CONF_POLL_INTERVAL] = poll_interval
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"],
-            {CONF_MEAL_PLAN_CALENDAR: True},
+            options,
         )
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
@@ -71,6 +79,7 @@ async def test_user_flow_success(hass: HomeAssistant) -> None:
     assert result["options"] == {
         CONF_SELECTED_LISTS: ["list-1"],
         CONF_MEAL_PLAN_CALENDAR: True,
+        CONF_POLL_INTERVAL: poll_interval or ANYLIST_DEFAULT_POLL_INTERVAL,
     }
 
 
@@ -189,6 +198,7 @@ async def test_options_flow_success(hass: HomeAssistant) -> None:
         {
             CONF_SELECTED_LISTS: ["list-1", "list-2"],
             CONF_MEAL_PLAN_CALENDAR: True,
+            CONF_POLL_INTERVAL: 300,
         },
     )
 
@@ -196,7 +206,84 @@ async def test_options_flow_success(hass: HomeAssistant) -> None:
     assert result["data"] == {
         CONF_SELECTED_LISTS: ["list-1", "list-2"],
         CONF_MEAL_PLAN_CALENDAR: True,
+        CONF_POLL_INTERVAL: 300,
     }
+
+
+@pytest.mark.parametrize(
+    ("stored", "expected"),
+    [(None, 60), (300, 300), (1, 60), (99999, 3600), ("invalid", 60)],
+)
+async def test_options_flow_poll_interval_defaults_and_bounds(
+    hass: HomeAssistant,
+    stored: object,
+    expected: int,
+) -> None:
+    """Test the poll interval defaults to the stored value and rejects bad input."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=USER_INPUT,
+        options={CONF_SELECTED_LISTS: ["list-1"], CONF_POLL_INTERVAL: stored},
+        unique_id="user-1",
+    )
+    entry.add_to_hass(hass)
+    entry.runtime_data = type(
+        "RuntimeData",
+        (),
+        {"client": FakeAnyListClient(lists=[fake_list("list-1", "Groceries")])},
+    )()
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    poll_interval_key = next(
+        key
+        for key in result["data_schema"].schema
+        if key.schema == CONF_POLL_INTERVAL
+    )
+    assert poll_interval_key.default() == expected
+
+    for invalid in (59, 3601, "invalid", None):
+        with pytest.raises(InvalidData):
+            await hass.config_entries.options.async_configure(
+                result["flow_id"],
+                {CONF_SELECTED_LISTS: ["list-1"], CONF_POLL_INTERVAL: invalid},
+            )
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {CONF_SELECTED_LISTS: ["list-1"], CONF_POLL_INTERVAL: 120},
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_POLL_INTERVAL] == 120
+
+
+@pytest.mark.parametrize("loaded", [False, True])
+@pytest.mark.parametrize("legacy", [False, True])
+async def test_poll_interval_change_preserves_unavailable_lists(
+    hass: HomeAssistant, loaded: bool, legacy: bool
+) -> None:
+    """Changing the interval while offline must retain the selected lists."""
+    settings = {CONF_SELECTED_LISTS: ["list-1"], CONF_MEAL_PLAN_CALENDAR: True}
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={**USER_INPUT, **settings} if legacy else USER_INPUT,
+        options={} if legacy else settings,
+        unique_id="user-1",
+    )
+    entry.add_to_hass(hass)
+    if loaded:
+        entry.runtime_data = type(
+            "RuntimeData", (), {"client": FakeAnyListClient()}
+        )()
+
+    with patch.object(FakeAnyListClient, "get_lists", side_effect=RuntimeError("offline")):
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], {CONF_POLL_INTERVAL: 300}
+        )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"] == {**settings, CONF_POLL_INTERVAL: 300}
 
 
 async def test_options_flow_handles_list_fetch_failure(hass: HomeAssistant) -> None:

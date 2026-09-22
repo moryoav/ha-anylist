@@ -6,6 +6,7 @@ CONF_EMAIL = "email"
 CONF_PASSWORD = "password"
 CONF_MEAL_PLAN_CALENDAR = "meal_plan_calendar"
 CONF_SELECTED_LISTS = "selected_lists"
+CONF_POLL_INTERVAL = "poll_interval"
 
 # Data keys
 DATA_CLIENT = "client"
@@ -17,7 +18,9 @@ ANYLIST_REQUEST_TIMEOUT = 15  # seconds
 ANYLIST_LOGIN_TIMEOUT = 20  # seconds
 ANYLIST_REFRESH_TIMEOUT = 30  # seconds
 ANYLIST_PHOTO_TIMEOUT = 65  # upload, token refresh, and image processing
-ANYLIST_POLL_INTERVAL = 60  # seconds
+ANYLIST_DEFAULT_POLL_INTERVAL = 60  # seconds, default when no option is configured
+ANYLIST_MIN_POLL_INTERVAL = 60  # seconds
+ANYLIST_MAX_POLL_INTERVAL = 3600  # seconds
 
 # Services
 SERVICE_REFRESH = "refresh"

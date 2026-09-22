@@ -11,12 +11,16 @@ from homeassistant import config_entries
 from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
 from homeassistant.helpers.selector import (
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
     SelectOptionDict,
     SelectSelector,
     SelectSelectorConfig,
     SelectSelectorMode,
 )
 
+from . import get_poll_interval
 from .client import (
     AnyListAuthError,
     AnyListClient,
@@ -24,9 +28,13 @@ from .client import (
     async_call_with_timeout,
 )
 from .const import (
+    ANYLIST_DEFAULT_POLL_INTERVAL,
     ANYLIST_LOGIN_TIMEOUT,
+    ANYLIST_MAX_POLL_INTERVAL,
+    ANYLIST_MIN_POLL_INTERVAL,
     ANYLIST_REQUEST_TIMEOUT,
     CONF_MEAL_PLAN_CALENDAR,
+    CONF_POLL_INTERVAL,
     CONF_SELECTED_LISTS,
     DOMAIN,
 )
@@ -57,6 +65,22 @@ def _credentials_schema(
             email_key: str,
             vol.Required(CONF_PASSWORD): str,
         }
+    )
+
+
+def _poll_interval_selector() -> vol.All:
+    """Return the selector used for the polling interval option."""
+    return vol.All(
+        NumberSelector(
+            NumberSelectorConfig(
+                min=ANYLIST_MIN_POLL_INTERVAL,
+                max=ANYLIST_MAX_POLL_INTERVAL,
+                step=1,
+                mode=NumberSelectorMode.BOX,
+                unit_of_measurement="seconds",
+            )
+        ),
+        vol.Coerce(int),
     )
 
 
@@ -277,6 +301,10 @@ class AnyListConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema(
                 {
                     vol.Optional(CONF_MEAL_PLAN_CALENDAR, default=False): bool,
+                    vol.Optional(
+                        CONF_POLL_INTERVAL,
+                        default=ANYLIST_DEFAULT_POLL_INTERVAL,
+                    ): _poll_interval_selector(),
                 }
             ),
         )
@@ -315,7 +343,13 @@ class AnyListOptionsFlowHandler(config_entries.OptionsFlow):
                 _LOGGER.warning("Failed to fetch AnyList lists for options: %s", err)
 
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            options = dict(user_input)
+            # The list selector is hidden when lists cannot be fetched.
+            if CONF_SELECTED_LISTS not in options:
+                selected_lists = _entry_option(self.config_entry, CONF_SELECTED_LISTS)
+                if selected_lists is not None:
+                    options[CONF_SELECTED_LISTS] = selected_lists
+            return self.async_create_entry(title="", data=options)
 
         # Build list options
         list_options: list[SelectOptionDict] = [
@@ -347,6 +381,11 @@ class AnyListOptionsFlowHandler(config_entries.OptionsFlow):
             CONF_MEAL_PLAN_CALENDAR,
             default=_entry_option(self.config_entry, CONF_MEAL_PLAN_CALENDAR, False),
         )] = bool
+
+        schema_dict[vol.Optional(
+            CONF_POLL_INTERVAL,
+            default=get_poll_interval(self.config_entry),
+        )] = _poll_interval_selector()
 
         return self.async_show_form(
             step_id="init",

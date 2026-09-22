@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -22,9 +23,13 @@ from custom_components.anylist import (
     async_migrate_entry,
     async_setup,
     async_setup_entry,
+    get_poll_interval,
 )
 from custom_components.anylist.client import AnyListAuthError, AnyListError
 from custom_components.anylist.const import (
+    ANYLIST_DEFAULT_POLL_INTERVAL,
+    ANYLIST_MAX_POLL_INTERVAL,
+    ANYLIST_MIN_POLL_INTERVAL,
     ATTR_CONFIG_ENTRY_ID,
     ATTR_INCLUDE_INGREDIENTS,
     ATTR_INCLUDE_STEPS,
@@ -36,6 +41,7 @@ from custom_components.anylist.const import (
     ATTR_RECIPE_NAME,
     ATTR_SCALE_FACTOR,
     CONF_MEAL_PLAN_CALENDAR,
+    CONF_POLL_INTERVAL,
     CONF_SELECTED_LISTS,
     DOMAIN,
     SERVICE_ADD_RECIPE_TO_LIST,
@@ -131,6 +137,114 @@ async def test_setup_entry_creates_todo_entity_and_unloads(
     assert getattr(entry, "runtime_data", None) is None
 
 
+async def test_setup_entry_uses_configured_poll_interval(
+    hass: HomeAssistant,
+) -> None:
+    """Test the coordinator polls at the interval stored in the options."""
+    entry = _mock_entry(
+        options={
+            CONF_SELECTED_LISTS: ["list-1"],
+            CONF_MEAL_PLAN_CALENDAR: False,
+            CONF_POLL_INTERVAL: 300,
+        }
+    )
+    entry.add_to_hass(hass)
+    client = FakeAnyListClient(lists=[fake_list("list-1", "Groceries")])
+
+    with patch(
+        "custom_components.anylist.AnyListClient.login",
+        return_value=client,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert entry.runtime_data.coordinator.update_interval == timedelta(seconds=300)
+
+
+async def test_setup_entry_defaults_poll_interval(hass: HomeAssistant) -> None:
+    """Test entries without the option keep the default polling interval."""
+    entry = _mock_entry()
+    entry.add_to_hass(hass)
+    client = FakeAnyListClient(lists=[fake_list("list-1", "Groceries")])
+
+    with patch(
+        "custom_components.anylist.AnyListClient.login",
+        return_value=client,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert entry.runtime_data.coordinator.update_interval == timedelta(
+        seconds=ANYLIST_DEFAULT_POLL_INTERVAL
+    )
+
+
+@pytest.mark.parametrize(
+    ("stored", "expected"),
+    [
+        (120, 120),
+        (120.0, 120),
+        ("300", 300),
+        (float("inf"), ANYLIST_DEFAULT_POLL_INTERVAL),
+        (float("nan"), ANYLIST_DEFAULT_POLL_INTERVAL),
+        (1, ANYLIST_MIN_POLL_INTERVAL),
+        (99999, ANYLIST_MAX_POLL_INTERVAL),
+        ("not-a-number", ANYLIST_DEFAULT_POLL_INTERVAL),
+        (None, ANYLIST_DEFAULT_POLL_INTERVAL),
+    ],
+)
+def test_get_poll_interval_clamps_values(stored, expected) -> None:
+    """Test stored poll intervals are validated and clamped to safe bounds."""
+    entry = _mock_entry(
+        options={CONF_SELECTED_LISTS: ["list-1"], CONF_POLL_INTERVAL: stored}
+    )
+
+    assert get_poll_interval(entry) == expected
+
+
+async def test_poll_interval_options_reload_and_refresh(hass: HomeAssistant) -> None:
+    """Apply interval changes on reload and keep explicit refreshes working."""
+    entry = _mock_entry()
+    entry.add_to_hass(hass)
+    client = FakeAnyListClient(lists=[fake_list("list-1", "Groceries")])
+
+    with patch("custom_components.anylist.AnyListClient.login", return_value=client):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        original_coordinator = entry.runtime_data.coordinator
+
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        await hass.config_entries.options.async_configure(
+            result["flow_id"], {CONF_POLL_INTERVAL: 3600}
+        )
+        await hass.async_block_till_done()
+
+        assert entry.state is ConfigEntryState.LOADED
+        assert entry.runtime_data.coordinator is not original_coordinator
+        assert entry.runtime_data.coordinator.update_interval == timedelta(hours=1)
+        diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+        assert diagnostics["runtime"]["poll_interval"] == 3600
+
+        client.calls.clear()
+        await hass.services.async_call(
+            "todo",
+            "add_item",
+            {"entity_id": "todo.anylist_groceries", "item": "Apples"},
+            blocking=True,
+        )
+        assert ("add_item", ("list-1", "Apples")) in client.calls
+        assert ("get_lists", ()) in client.calls
+
+        client.calls.clear()
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_REFRESH,
+            {ATTR_CONFIG_ENTRY_ID: entry.entry_id},
+            blocking=True,
+        )
+        assert ("get_lists", ()) in client.calls
+
+
 async def test_setup_entry_raises_auth_failed(hass: HomeAssistant) -> None:
     """Test setup raises auth failure for bad credentials."""
     entry = _mock_entry()
@@ -212,6 +326,7 @@ async def test_diagnostics_redacts_sensitive_data(hass: HomeAssistant) -> None:
     assert diagnostics["runtime"]["list_count"] == len(client.lists)
     assert diagnostics["runtime"]["favourites_count"] == len(client.favourites)
     assert diagnostics["runtime"]["selected_list_count"] == 1
+    assert diagnostics["runtime"]["poll_interval"] == ANYLIST_DEFAULT_POLL_INTERVAL
 
 
 async def test_sensor_metadata() -> None:
