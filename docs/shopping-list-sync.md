@@ -49,7 +49,7 @@ Before enabling synchronization, make both lists contain the items and completio
 
 The automation copies **item names and completion states**. Categories stay on the AnyList side and control the card's grouping. It does not copy separate quantity fields, notes, due dates, or category metadata between the services. For a quantity that must be visible in both lists, I put it in the name, such as `milk x2`.
 
-The AnyList integration polls every 60 seconds and requests a refresh after changes made through Home Assistant. An edit in the AnyList app can therefore take up to one normal polling interval to reach Home Assistant. Alexa Devices receives shopping list changes through push events, according to its [data update documentation](https://www.home-assistant.io/integrations/alexa_devices/#data-updates); actual delivery still depends on the connection and service.
+The AnyList integration polls every 60 seconds by default and requests a refresh after changes made through Home Assistant. You can set **Polling Interval** in the integration options to a value from 60 to 3600 seconds. An edit in the AnyList app can therefore take up to one configured polling interval to reach Home Assistant. Alexa Devices receives shopping list changes through push events, according to its [data update documentation](https://www.home-assistant.io/integrations/alexa_devices/#data-updates); actual delivery still depends on the connection and service.
 
 ### A concrete comparison
 
@@ -564,7 +564,7 @@ Use a real trigger or the refresh button for this check. The automation relies o
 | --- | --- |
 | No Alexa shopping list entity | Confirm that Alexa Devices is configured successfully and that Home Assistant supports its to-do platform. Check its integration page for authentication or connection errors. |
 | The automation stops because a list is unreadable | Inspect both entities in Developer tools. AnyList needs an `items_signature` as well as an available state. Read the trace's stop reason and the integration logs. |
-| AnyList app changes take time | Allow a normal 60-second polling interval. To refresh only AnyList, call `anylist.refresh` in Developer tools → Actions. The card's refresh button additionally selects Alexa as the sync source. |
+| AnyList app changes take time | Allow one configured polling interval (60 seconds by default). To refresh only AnyList, call `anylist.refresh` in Developer tools → Actions. The card's refresh button additionally selects Alexa as the sync source. |
 | An Alexa rename does not reach AnyList | The unfinished count may be unchanged. When Alexa holds the desired list, use the card's explicit refresh. |
 | Items disappear after refresh or restart | Check the selected source. The automation removes destination-only entries, and both refresh paths select Alexa. |
 | Items appear twice or completion states disagree | Check for repeated names after trimming and lowercasing. Use unique names in each list. |

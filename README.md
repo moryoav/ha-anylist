@@ -58,7 +58,7 @@ Configuration options:
 
 - **Shopping Lists**: choose which AnyList shopping lists should be exposed as Home Assistant todo entities. If no explicit list selection is stored, all lists are exposed.
 - **Enable Meal Plan Calendar URL**: creates a diagnostic sensor containing the AnyList meal plan iCalendar URL.
-- **Polling Interval**: how often AnyList is polled for changes, in seconds. Defaults to 60. Higher values reduce cloud requests but delay changes made by other AnyList clients.
+- **Polling Interval**: how often AnyList is polled for changes, from 60 to 3600 seconds (1 minute to 1 hour). Defaults to 60 seconds. Higher values reduce cloud requests but delay changes made by other AnyList clients.
 
 Use **Configure** on the integration entry to change selected lists, meal plan URL exposure, or the polling interval. Use **Reconfigure** to update account credentials.
 

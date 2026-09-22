@@ -216,7 +216,7 @@ def get_poll_interval(entry: ConfigEntry) -> int:
     value = _entry_option(entry, CONF_POLL_INTERVAL, ANYLIST_DEFAULT_POLL_INTERVAL)
     try:
         interval = int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         _LOGGER.warning(
             "Invalid AnyList poll interval %r, using %s seconds",
             value,

@@ -20,6 +20,7 @@ from homeassistant.helpers.selector import (
     SelectSelectorMode,
 )
 
+from . import get_poll_interval
 from .client import (
     AnyListAuthError,
     AnyListClient,
@@ -67,7 +68,7 @@ def _credentials_schema(
     )
 
 
-def _poll_interval_selector() -> Any:
+def _poll_interval_selector() -> vol.All:
     """Return the selector used for the polling interval option."""
     return vol.All(
         NumberSelector(
@@ -342,7 +343,13 @@ class AnyListOptionsFlowHandler(config_entries.OptionsFlow):
                 _LOGGER.warning("Failed to fetch AnyList lists for options: %s", err)
 
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            options = dict(user_input)
+            # The list selector is hidden when lists cannot be fetched.
+            if CONF_SELECTED_LISTS not in options:
+                selected_lists = _entry_option(self.config_entry, CONF_SELECTED_LISTS)
+                if selected_lists is not None:
+                    options[CONF_SELECTED_LISTS] = selected_lists
+            return self.async_create_entry(title="", data=options)
 
         # Build list options
         list_options: list[SelectOptionDict] = [
@@ -377,9 +384,7 @@ class AnyListOptionsFlowHandler(config_entries.OptionsFlow):
 
         schema_dict[vol.Optional(
             CONF_POLL_INTERVAL,
-            default=_entry_option(
-                self.config_entry, CONF_POLL_INTERVAL, ANYLIST_DEFAULT_POLL_INTERVAL
-            ),
+            default=get_poll_interval(self.config_entry),
         )] = _poll_interval_selector()
 
         return self.async_show_form(

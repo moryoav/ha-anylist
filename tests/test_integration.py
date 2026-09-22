@@ -184,6 +184,9 @@ async def test_setup_entry_defaults_poll_interval(hass: HomeAssistant) -> None:
     [
         (120, 120),
         (120.0, 120),
+        ("300", 300),
+        (float("inf"), ANYLIST_DEFAULT_POLL_INTERVAL),
+        (float("nan"), ANYLIST_DEFAULT_POLL_INTERVAL),
         (1, ANYLIST_MIN_POLL_INTERVAL),
         (99999, ANYLIST_MAX_POLL_INTERVAL),
         ("not-a-number", ANYLIST_DEFAULT_POLL_INTERVAL),
@@ -197,6 +200,49 @@ def test_get_poll_interval_clamps_values(stored, expected) -> None:
     )
 
     assert get_poll_interval(entry) == expected
+
+
+async def test_poll_interval_options_reload_and_refresh(hass: HomeAssistant) -> None:
+    """Apply interval changes on reload and keep explicit refreshes working."""
+    entry = _mock_entry()
+    entry.add_to_hass(hass)
+    client = FakeAnyListClient(lists=[fake_list("list-1", "Groceries")])
+
+    with patch("custom_components.anylist.AnyListClient.login", return_value=client):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        original_coordinator = entry.runtime_data.coordinator
+
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        await hass.config_entries.options.async_configure(
+            result["flow_id"], {CONF_POLL_INTERVAL: 3600}
+        )
+        await hass.async_block_till_done()
+
+        assert entry.state is ConfigEntryState.LOADED
+        assert entry.runtime_data.coordinator is not original_coordinator
+        assert entry.runtime_data.coordinator.update_interval == timedelta(hours=1)
+        diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+        assert diagnostics["runtime"]["poll_interval"] == 3600
+
+        client.calls.clear()
+        await hass.services.async_call(
+            "todo",
+            "add_item",
+            {"entity_id": "todo.anylist_groceries", "item": "Apples"},
+            blocking=True,
+        )
+        assert ("add_item", ("list-1", "Apples")) in client.calls
+        assert ("get_lists", ()) in client.calls
+
+        client.calls.clear()
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_REFRESH,
+            {ATTR_CONFIG_ENTRY_ID: entry.entry_id},
+            blocking=True,
+        )
+        assert ("get_lists", ()) in client.calls
 
 
 async def test_setup_entry_raises_auth_failed(hass: HomeAssistant) -> None:
