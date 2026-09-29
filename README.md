@@ -1,13 +1,20 @@
 # AnyList for Home Assistant
-[![HACS][hacs-badge]][hacs-url] [![release][release-badge]][release-url] [![hassfest][hassfest-badge]][hassfest-url] [![validate][validate-badge]][validate-url] [![license](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](LICENSE)
+
+[![Release][release-badge]][release-url]
+[![HACS][hacs-badge]][hacs-url]
+[![License][license-badge]][license-url]
 
 ---
 
-## Support me on Ko-fi
+## ❤️ Help support this project
 
-If this project is useful to you, you can support its continued development:
+If this project is useful to you, you can support my work:
 
-[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/Y5B124NZ2L)
+<p>
+  <a href="https://ko-fi.com/Y5B124NZ2L"><img src="https://img.shields.io/badge/Support_on_Ko--fi-FF5E5B?style=for-the-badge&amp;logo=kofi&amp;logoColor=white" alt="Support on Ko-fi" height="36"></a>
+  &nbsp;
+  <a href="https://github.com/sponsors/moryoav"><img src="https://img.shields.io/badge/Sponsor_on_GitHub-EA4AAA?style=for-the-badge&amp;logo=githubsponsors&amp;logoColor=white" alt="Sponsor on GitHub" height="36"></a>
+</p>
 
 ---
 
@@ -324,13 +331,9 @@ This project is unofficial and is not affiliated with or endorsed by AnyList or 
 
 MIT
 
-[hacs-badge]: https://img.shields.io/badge/HACS-Default-41BDF5.svg?style=flat-square
-[hacs-url]: https://github.com/hacs/integration
+[hacs-badge]: https://img.shields.io/badge/HACS-41BDF5.svg?style=flat-square
+[hacs-url]: #installation
 [release-badge]: https://img.shields.io/github/v/release/moryoav/ha-anylist?style=flat-square
-[release-url]: https://github.com/moryoav/ha-anylist/releases
-[hassfest-badge]: https://img.shields.io/github/actions/workflow/status/moryoav/ha-anylist/hassfest.yaml?branch=main&style=flat-square&label=hassfest
-[hassfest-url]: https://github.com/moryoav/ha-anylist/actions/workflows/hassfest.yaml
-[validate-badge]: https://img.shields.io/github/actions/workflow/status/moryoav/ha-anylist/validate.yaml?branch=main&style=flat-square&label=validate
-[validate-url]: https://github.com/moryoav/ha-anylist/actions/workflows/validate.yaml
+[release-url]: https://github.com/moryoav/ha-anylist/releases/latest
 [license-badge]: https://img.shields.io/github/license/moryoav/ha-anylist?style=flat-square
-[license-url]: https://github.com/moryoav/ha-anylist/blob/main/LICENSE
+[license-url]: LICENSE
