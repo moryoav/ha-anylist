@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.1 - 2026-09-29
+
+- Add automated HACS ZIP releases containing the AnyList integration files at
+  the archive root.
+- Run HACS and Hassfest checks on main pushes, pull requests targeting main,
+  and release workflow calls while keeping the daily HACS check.
+
 ## 0.7.0 - 2026-09-22
 
 - Add a configurable polling interval from 60 to 3600 seconds during setup and
