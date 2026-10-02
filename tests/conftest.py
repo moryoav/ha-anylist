@@ -49,6 +49,8 @@ class FakeAnyListClient:
         self.favourites = favourites if favourites is not None else []
         self.recipes = recipes if recipes is not None else [fake_recipe()]
         self.calls: list[tuple[str, tuple[Any, ...]]] = []
+        # Whether each added item was sent with the "insert at top" position.
+        self.added_at_top: list[bool] = []
 
     def user_id(self) -> str:
         """Return the fake account ID."""
@@ -144,11 +146,12 @@ class FakeAnyListClient:
         self.calls.append(("delete_recipe", (recipe_id,)))
         self.recipes = [recipe for recipe in self.recipes if recipe.id != recipe_id]
 
-    def add_item(self, list_id: str, name: str) -> Any:
+    def add_item(self, list_id: str, name: str, at_top: bool = False) -> Any:
         """Record adding a todo item."""
         self.calls.append(("add_item", (list_id, name)))
+        self.added_at_top.append(at_top)
         item = fake_item("new-item", name)
-        self.lists[0].items.append(item)
+        self.lists[0].items.insert(0 if at_top else len(self.lists[0].items), item)
         return item
 
     def add_item_with_details(
@@ -159,6 +162,7 @@ class FakeAnyListClient:
         details: str | None = None,
         category: str | None = None,
         category_assignment: Any | None = None,
+        at_top: bool = False,
     ) -> Any:
         """Record adding a detailed todo item."""
         self.calls.append(
@@ -167,9 +171,34 @@ class FakeAnyListClient:
                 (list_id, name, quantity, details, category, category_assignment),
             )
         )
+        self.added_at_top.append(at_top)
         item = fake_item("new-item", name, quantity=quantity, details=details)
-        self.lists[0].items.append(item)
+        self.lists[0].items.insert(0 if at_top else len(self.lists[0].items), item)
         return item
+
+    def rename_item(
+        self, list_id: str, item_id: str, name: str, original_name: str | None = None
+    ) -> None:
+        """Record renaming a todo item."""
+        self.calls.append(("rename_item", (list_id, item_id, name, original_name)))
+
+    def move_item(
+        self, list_id: str, item_id: str, previous_item_id: str | None = None
+    ) -> None:
+        """Record moving a todo item."""
+        self.calls.append(("move_item", (list_id, item_id, previous_item_id)))
+
+    def set_list_sort_order(self, list_id: str, sort_order: str) -> None:
+        """Record changing a list's sort order."""
+        self.calls.append(("set_list_sort_order", (list_id, sort_order)))
+
+    def set_new_item_position(
+        self, list_id: str, position: str, set_manual_sort_order: bool = False
+    ) -> None:
+        """Record changing where a list inserts new items."""
+        self.calls.append(
+            ("set_new_item_position", (list_id, position, set_manual_sort_order))
+        )
 
     def cross_off_item(self, list_id: str, item_id: str) -> None:
         """Record checking off a todo item."""
@@ -256,6 +285,9 @@ def fake_list(
     items: list[Any] | None = None,
     categories: list[Any] | None = None,
     category_assignments: list[Any] | None = None,
+    sort_order: str = "manual",
+    sort_order_is_set: bool = False,
+    new_item_position: str = "bottom",
 ) -> Any:
     """Return a fake AnyList shopping list."""
     return SimpleNamespace(
@@ -264,6 +296,9 @@ def fake_list(
         items=items if items is not None else [fake_item()],
         categories=categories if categories is not None else [],
         category_assignments=category_assignments if category_assignments is not None else [],
+        sort_order=sort_order,
+        sort_order_is_set=sort_order_is_set,
+        new_item_position=new_item_position,
     )
 
 

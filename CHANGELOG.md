@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.8.0 - 2026-10-02
+
+- Honour the list's **Insert New Items** setting when Home Assistant adds an
+  item, so new items land at the top of lists set to **At Top**, as they do in
+  the AnyList app ([#5](https://github.com/moryoav/ha-anylist/issues/5)).
+- Add **Item sort order** and **Insert new items** select entities for each
+  shopping list. They read and change the same list settings as the AnyList
+  app.
+- Support reordering items by dragging them in the Home Assistant to-do list,
+  on manually sorted lists.
+- Fix renaming an item from Home Assistant, which was previously ignored.
+- Show items of alphabetically sorted lists in alphabetical order, matching
+  the AnyList app.
+- Give each shopping list its own device holding the list and its settings.
+  Existing todo entities keep their entity IDs and names and move to the new
+  list devices. Devices of deselected or deleted lists are removed.
+
 ## 0.7.1 - 2026-09-29
 
 - Add automated HACS ZIP releases containing the AnyList integration files at

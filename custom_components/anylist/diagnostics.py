@@ -48,6 +48,18 @@ async def async_get_config_entry_diagnostics(
                 shopping_list.id: len(shopping_list.items)
                 for shopping_list in lists
             },
+            "list_settings": {
+                shopping_list.id: {
+                    "sort_order": getattr(shopping_list, "sort_order", None),
+                    "sort_order_is_set": getattr(
+                        shopping_list, "sort_order_is_set", None
+                    ),
+                    "new_item_position": getattr(
+                        shopping_list, "new_item_position", None
+                    ),
+                }
+                for shopping_list in lists
+            },
             "favourites_count": len(favourites),
             "meal_plan_calendar_enabled": entry.options.get(
                 CONF_MEAL_PLAN_CALENDAR,

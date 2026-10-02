@@ -46,16 +46,14 @@ rules:
   docs-supported-functions: done
   docs-troubleshooting: done
   docs-use-cases: done
-  dynamic-devices:
-    status: exempt
-    comment: Shopping lists are dynamic entities under one AnyList service device, not separately discovered devices.
+  dynamic-devices: done
   entity-category: done
   entity-device-class:
     status: exempt
-    comment: Todo entities and the diagnostic URL sensor do not have applicable device classes.
+    comment: Todo entities, list setting selects and the diagnostic URL sensor do not have applicable device classes.
   entity-disabled-by-default:
     status: exempt
-    comment: The integration exposes selected shopping lists and one optional diagnostic sensor only.
+    comment: The integration exposes selected shopping lists, their two list settings and one optional diagnostic sensor only.
   entity-translations: done
   exception-translations: done
   icon-translations: done
@@ -63,9 +61,7 @@ rules:
   repair-issues:
     status: exempt
     comment: Authentication failures use ConfigEntryAuthFailed and the reauthentication flow; no additional repair flow is currently needed.
-  stale-devices:
-    status: exempt
-    comment: The integration creates one service device for the AnyList account; lists are entities and are filtered by options.
+  stale-devices: done
 
   async-dependency:
     status: exempt

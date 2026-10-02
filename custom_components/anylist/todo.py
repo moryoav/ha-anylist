@@ -15,13 +15,18 @@ from homeassistant.components.todo import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, CoordinatorEntity
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .category import resolve_category_for_item
-from .client import async_call_with_timeout
-from .const import ANYLIST_REQUEST_TIMEOUT, CONF_SELECTED_LISTS, DOMAIN
+from .client import (
+    SORT_ORDER_ALPHABETICAL,
+    SORT_ORDER_MANUAL,
+    async_call_with_timeout,
+    inserts_new_items_at_top,
+)
+from .const import ANYLIST_REQUEST_TIMEOUT, DOMAIN
+from .entity import AnyListListEntity, find_shopping_list, selected_list_ids
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -42,10 +47,7 @@ async def async_setup_entry(
     known_list_ids: set[str] = set()
 
     # Get selected lists from config (empty list means all lists)
-    selected_lists = config_entry.options.get(
-        CONF_SELECTED_LISTS,
-        config_entry.data.get(CONF_SELECTED_LISTS, []),
-    )
+    selected_lists = selected_list_ids(config_entry)
 
     @callback
     def _async_add_new_lists() -> None:
@@ -77,15 +79,22 @@ async def async_setup_entry(
     )
 
 
-class AnyListTodoEntity(CoordinatorEntity, TodoListEntity):
+def _ordered_items(shopping_list: Any) -> list[Any]:
+    """Return a list's items in the order the AnyList app shows them."""
+    items = list(shopping_list.items)
+    if (
+        getattr(shopping_list, "sort_order", SORT_ORDER_MANUAL)
+        == SORT_ORDER_ALPHABETICAL
+    ):
+        items.sort(key=lambda item: str(getattr(item, "name", "") or "").casefold())
+    return items
+
+
+class AnyListTodoEntity(AnyListListEntity, TodoListEntity):
     """An AnyList shopping list as a Home Assistant todo entity."""
 
-    _attr_has_entity_name = True
-    _attr_supported_features = (
-        TodoListEntityFeature.CREATE_TODO_ITEM
-        | TodoListEntityFeature.UPDATE_TODO_ITEM
-        | TodoListEntityFeature.DELETE_TODO_ITEM
-    )
+    # The list is the main feature of its device and takes the device name.
+    _attr_name = None
 
     def __init__(
         self,
@@ -95,26 +104,21 @@ class AnyListTodoEntity(CoordinatorEntity, TodoListEntity):
         config_entry: ConfigEntry,
     ) -> None:
         """Initialize the todo entity."""
-        super().__init__(coordinator)
-        self._client = client
-        self._list_id = shopping_list.id
+        super().__init__(coordinator, client, shopping_list, config_entry)
         self._attr_unique_id = f"anylist_{shopping_list.id}"
-        self._attr_name = shopping_list.name
-        self._attr_device_info = DeviceInfo(
-            entry_type=DeviceEntryType.SERVICE,
-            identifiers={(DOMAIN, config_entry.entry_id)},
-            manufacturer="Purple Cover, Inc.",
-            name="AnyList",
-            configuration_url="https://www.anylist.com/",
-        )
 
     @property
-    def available(self) -> bool:
-        """Return whether this shopping list is present in fresh coordinator data."""
-        return super().available and any(
-            getattr(shopping_list, "id", None) == self._list_id
-            for shopping_list in (self.coordinator.data or {}).get("lists", [])
+    def supported_features(self) -> TodoListEntityFeature:
+        """Return the supported features; items only move on manually sorted lists."""
+        features = (
+            TodoListEntityFeature.CREATE_TODO_ITEM
+            | TodoListEntityFeature.UPDATE_TODO_ITEM
+            | TodoListEntityFeature.DELETE_TODO_ITEM
         )
+        shopping_list = find_shopping_list(self.coordinator, self._list_id)
+        if getattr(shopping_list, "sort_order", SORT_ORDER_MANUAL) == SORT_ORDER_MANUAL:
+            features |= TodoListEntityFeature.MOVE_TODO_ITEM
+        return features
 
     @property
     def todo_items(self) -> list[TodoItem]:
@@ -124,7 +128,7 @@ class AnyListTodoEntity(CoordinatorEntity, TodoListEntity):
         # Find our list in the coordinator data
         for shopping_list in self.coordinator.data.get("lists", []):
             if shopping_list.id == self._list_id:
-                for item in shopping_list.items:
+                for item in _ordered_items(shopping_list):
                     # Build description from quantity and details
                     description_parts = []
                     if item.quantity:
@@ -162,7 +166,7 @@ class AnyListTodoEntity(CoordinatorEntity, TodoListEntity):
             groups: dict[str, list[dict[str, str]]] = {}
             group_order = self._category_order(shopping_list)
 
-            for item in shopping_list.items:
+            for item in _ordered_items(shopping_list):
                 display_name = str(
                     getattr(item, "name", None) or getattr(item, "summary", "")
                 ).strip()
@@ -312,12 +316,18 @@ class AnyListTodoEntity(CoordinatorEntity, TodoListEntity):
                 self.coordinator.data.get("favourites", []),
             )
 
+            # Honour the list's "Insert New Items" setting like the AnyList app.
+            at_top = inserts_new_items_at_top(
+                find_shopping_list(self.coordinator, self._list_id)
+            )
+
             if not item.description and category_resolution is None:
                 await self._async_call_client(
                     "create todo item",
                     self._client.add_item,
                     self._list_id,
                     item.summary,
+                    at_top,
                 )
                 await self.coordinator.async_request_refresh()
                 return
@@ -335,6 +345,7 @@ class AnyListTodoEntity(CoordinatorEntity, TodoListEntity):
                     if category_resolution
                     else None
                 ),
+                at_top,
             )
         await self.coordinator.async_request_refresh()
 
@@ -352,6 +363,31 @@ class AnyListTodoEntity(CoordinatorEntity, TodoListEntity):
 
     async def async_update_todo_item(self, item: TodoItem) -> None:
         """Update an item on the list."""
+        current = next(
+            (
+                todo_item
+                for todo_item in self.todo_items
+                if todo_item.uid == item.uid
+            ),
+            None,
+        )
+        if (
+            current is not None
+            and item.summary
+            and item.summary != current.summary
+        ):
+            await self._async_call_client(
+                "rename todo item",
+                self._client.rename_item,
+                self._list_id,
+                item.uid,
+                item.summary,
+                current.summary,
+            )
+            if item.status == current.status:
+                await self.coordinator.async_request_refresh()
+                return
+
         if item.status == TodoItemStatus.COMPLETED:
             await self._async_call_client(
                 "complete todo item",
@@ -378,6 +414,19 @@ class AnyListTodoEntity(CoordinatorEntity, TodoListEntity):
         )
         await self.coordinator.async_request_refresh()
 
+    async def async_move_todo_item(
+        self, uid: str, previous_uid: str | None = None
+    ) -> None:
+        """Move an item directly after another one, or to the top of the list."""
+        await self._async_call_client(
+            "move todo item",
+            self._client.move_item,
+            self._list_id,
+            uid,
+            previous_uid,
+        )
+        await self.coordinator.async_request_refresh()
+
     async def _async_call_client(self, action: str, func, *args) -> None:
         """Run a todo mutation with logging and timeout protection."""
         _LOGGER.debug("AnyList todo mutation started: %s", action)
@@ -399,13 +448,3 @@ class AnyListTodoEntity(CoordinatorEntity, TodoListEntity):
                 },
             ) from err
         _LOGGER.debug("AnyList todo mutation succeeded: %s", action)
-
-    @callback
-    def _handle_coordinator_update(self) -> None:
-        """Handle updated data from the coordinator."""
-        # Update our list data if needed
-        for shopping_list in self.coordinator.data.get("lists", []):
-            if shopping_list.id == self._list_id:
-                self._attr_name = shopping_list.name
-                break
-        self.async_write_ha_state()

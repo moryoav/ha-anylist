@@ -324,6 +324,13 @@ async def test_diagnostics_redacts_sensitive_data(hass: HomeAssistant) -> None:
     assert diagnostics["entry"]["data"][CONF_PASSWORD] == "**REDACTED**"
     assert diagnostics["runtime"]["icalendar_url"] == "**REDACTED**"
     assert diagnostics["runtime"]["list_count"] == len(client.lists)
+    assert diagnostics["runtime"]["list_settings"] == {
+        "list-1": {
+            "sort_order": "manual",
+            "sort_order_is_set": False,
+            "new_item_position": "bottom",
+        }
+    }
     assert diagnostics["runtime"]["favourites_count"] == len(client.favourites)
     assert diagnostics["runtime"]["selected_list_count"] == 1
     assert diagnostics["runtime"]["poll_interval"] == ANYLIST_DEFAULT_POLL_INTERVAL
@@ -436,7 +443,8 @@ async def test_todo_entity_items_and_mutations(hass: HomeAssistant) -> None:
     assert "||" not in entity.extra_state_attributes["items_signature_raw"]
     entity.async_write_ha_state = lambda: None
     entity._handle_coordinator_update()
-    assert entity.name == "Groceries"
+    assert entity.name is None
+    assert entity.device_info["name"] == "AnyList Groceries"
 
 
 async def test_todo_entity_groups_items_by_native_categories(

@@ -49,6 +49,8 @@ Before enabling synchronization, make both lists contain the items and completio
 
 The automation copies **item names and completion states**. Categories stay on the AnyList side and control the card's grouping. It does not copy separate quantity fields, notes, due dates, or category metadata between the services. For a quantity that must be visible in both lists, I put it in the name, such as `milk x2`.
 
+Items copied from Alexa follow the AnyList list's **Insert New Items** setting. With **At Top** selected in the AnyList app, or on the list's **Insert new items** entity in Home Assistant, a voice-added item lands at the top of the list, the same as an item added in the app.
+
 The AnyList integration polls every 60 seconds by default and requests a refresh after changes made through Home Assistant. You can set **Polling Interval** in the integration options to a value from 60 to 3600 seconds. An edit in the AnyList app can therefore take up to one configured polling interval to reach Home Assistant. Alexa Devices receives shopping list changes through push events, according to its [data update documentation](https://www.home-assistant.io/integrations/alexa_devices/#data-updates); actual delivery still depends on the connection and service.
 
 ### A concrete comparison

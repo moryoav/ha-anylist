@@ -83,6 +83,22 @@
     }
   },
   "entity": {
+    "select": {
+      "sort_order": {
+        "name": "Item sort order",
+        "state": {
+          "manual": "Manual",
+          "alphabetical": "Alphabetical"
+        }
+      },
+      "new_item_position": {
+        "name": "Insert new items",
+        "state": {
+          "top": "At top",
+          "bottom": "At bottom"
+        }
+      }
+    },
     "sensor": {
       "meal_plan_icalendar_url": {
         "name": "Meal plan iCalendar URL"
@@ -125,6 +141,9 @@
     },
     "todo_mutation_failed": {
       "message": "Failed to update AnyList todo item while trying to {action}: {error}"
+    },
+    "list_setting_failed": {
+      "message": "Failed to update the AnyList list setting: {error}"
     },
     "recipes_load_failed": {
       "message": "Failed to load AnyList recipes: {error}"
