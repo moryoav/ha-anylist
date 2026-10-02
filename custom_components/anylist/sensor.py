@@ -5,10 +5,9 @@ from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
+from .entity import account_device_info
 
 
 async def async_setup_entry(
@@ -39,10 +38,4 @@ class AnyListICalendarURLSensor(SensorEntity):
         """Initialize the sensor."""
         self._attr_unique_id = f"{entry.entry_id}_icalendar_url"
         self._attr_native_value = icalendar_url
-        self._attr_device_info = DeviceInfo(
-            entry_type=DeviceEntryType.SERVICE,
-            identifiers={(DOMAIN, entry.entry_id)},
-            manufacturer="Purple Cover, Inc.",
-            name="AnyList",
-            configuration_url="https://www.anylist.com/",
-        )
+        self._attr_device_info = account_device_info(entry)

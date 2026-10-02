@@ -1,5 +1,19 @@
 {
   "entity": {
+    "select": {
+      "sort_order": {
+        "default": "mdi:sort",
+        "state": {
+          "alphabetical": "mdi:sort-alphabetical-ascending"
+        }
+      },
+      "new_item_position": {
+        "default": "mdi:format-vertical-align-bottom",
+        "state": {
+          "top": "mdi:format-vertical-align-top"
+        }
+      }
+    },
     "sensor": {
       "meal_plan_icalendar_url": {
         "default": "mdi:calendar-export"

@@ -24,7 +24,9 @@ AnyList is a shared grocery list and meal planning service. This integration bri
 
 ## Features
 
-- **Shopping lists** as todo entities: view, add, check off, and remove items.
+- **Shopping lists** as todo entities: view, add, rename, check off, reorder, and remove items.
+- **A device per shopping list** with the list and its settings on one page.
+- **List settings** as select entities: item sort order and where new items are inserted.
 - **Automatic AnyList categories** when adding known items from Home Assistant.
 - **Shopping list change signatures** for automations that need to detect renamed, added, removed, checked, or unchecked items.
 - **Meal plan iCalendar URL** as a diagnostic sensor when the option is enabled.
@@ -71,14 +73,24 @@ Use **Configure** on the integration entry to change selected lists, meal plan U
 
 ## Supported Functionality
 
+### Shopping List Devices
+
+Each selected AnyList shopping list is a device named **AnyList** followed by the list name. It holds the list's todo entity and its two setting entities. The list devices are connected through an **AnyList** account device, which also holds the optional meal plan sensor.
+
+When a list is renamed in AnyList, its device is renamed with it. When a list is deselected in the integration options or deleted in AnyList, its device and entities are removed the next time the integration reloads.
+
 ### Todo Entities
 
 Each selected AnyList shopping list appears as a todo entity. You can:
 
-- View items on the list.
+- View items on the list, in the list's manual or alphabetical order.
 - Add new items.
+- Rename items.
 - Check off and uncheck items.
+- Reorder items by dragging them in the Home Assistant to-do list, on manually sorted lists.
 - Remove one or more items.
+
+New items follow the list's **Insert New Items** setting, the same as in the AnyList app: at the top or at the bottom of a manually sorted list. Adding an item that is already on the list as crossed off uncrosses it and leaves it where it is, which is also what the app does.
 
 When Home Assistant adds an item that AnyList already knows how to categorize
 for that list, the integration sends the same category assignment metadata used
@@ -88,6 +100,15 @@ Todo entities expose these state attributes for content-change detection:
 
 - `items_signature`: a SHA256 hash of current item names and completion states.
 - `items_signature_raw`: the normalized source string used to build the hash.
+
+### List Setting Entities
+
+Each shopping list device has two select entities that mirror settings from the AnyList app:
+
+- **Item sort order**: **Manual** or **Alphabetical**.
+- **Insert new items**: **At top** or **At bottom**. AnyList only uses this setting on manually sorted lists, so the entity is unavailable while the list is sorted alphabetically.
+
+These settings are stored on the list in AnyList, not in Home Assistant. A change made here shows up in the AnyList apps, and a change made in an app shows up here after the next poll. On a shared list, they change for everyone the list is shared with.
 
 ### Meal Plan iCalendar URL Sensor
 
@@ -283,6 +304,8 @@ response_variable: anylist_recipes
 - Realtime websocket sync is intentionally disabled; polling is the reliable update path.
 - The integration supports AnyList cloud accounts, not local devices.
 - Recipe import from external websites is not implemented.
+- Items can be reordered by dragging them in the Home Assistant to-do list, but not from automations: Home Assistant has no action for moving a to-do item.
+- Item notes and quantities are shown in Home Assistant but cannot be edited there.
 - Meal plan calendar support exposes the iCalendar URL; calendar entities are provided by Home Assistant's iCal integration.
 
 ## Troubleshooting

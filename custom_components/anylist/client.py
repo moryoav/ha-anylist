@@ -34,6 +34,17 @@ _PHOTO_BASE_URL = "https://photos.anylist.com/"
 _PHOTO_READY_TIMEOUT = 15
 _ICALENDAR_TOKEN_RE = re.compile(r"[a-f0-9]{32}")
 
+SORT_ORDER_MANUAL = "manual"
+SORT_ORDER_ALPHABETICAL = "alphabetical"
+NEW_ITEM_POSITION_BOTTOM = "bottom"
+NEW_ITEM_POSITION_TOP = "top"
+
+# ShoppingList.ListItemSortOrder and ShoppingList.NewListItemPosition enums.
+_SORT_ORDER_VALUES = {SORT_ORDER_MANUAL: 0, SORT_ORDER_ALPHABETICAL: 1}
+_NEW_ITEM_POSITION_VALUES = {NEW_ITEM_POSITION_BOTTOM: 0, NEW_ITEM_POSITION_TOP: 1}
+# Older per-user PBListSettings.listItemSortOrder value.
+_USER_SORT_ORDER_ALPHABETICAL = "ALListItemSortOrderAlphabetical"
+
 _T = TypeVar("_T")
 
 
@@ -111,6 +122,23 @@ class ShoppingList:
     items: list[ListItem] = field(default_factory=list)
     categories: list[ListCategory] = field(default_factory=list)
     category_assignments: list[ItemCategoryAssignment] = field(default_factory=list)
+    sort_order: str = SORT_ORDER_MANUAL
+    # False while the list itself stores no sort order and the value above
+    # comes from the per-user list settings or the default.
+    sort_order_is_set: bool = False
+    new_item_position: str = NEW_ITEM_POSITION_BOTTOM
+
+
+def inserts_new_items_at_top(shopping_list: Any) -> bool:
+    """Return whether the AnyList app would add new items at the top.
+
+    The app only honours the position on manually sorted lists.
+    """
+    return (
+        getattr(shopping_list, "sort_order", SORT_ORDER_MANUAL) == SORT_ORDER_MANUAL
+        and getattr(shopping_list, "new_item_position", NEW_ITEM_POSITION_BOTTOM)
+        == NEW_ITEM_POSITION_TOP
+    )
 
 
 @dataclass(slots=True)
@@ -486,7 +514,54 @@ def _parse_shopping_list(data: bytes) -> ShoppingList | None:
         for item in [_parse_list_item(raw_item, list_id)]
         if item is not None
     ]
-    return ShoppingList(id=list_id, name=name, items=items)
+    sort_order = _first_int(fields, 17)
+    return ShoppingList(
+        id=list_id,
+        name=name,
+        items=items,
+        sort_order=(
+            SORT_ORDER_ALPHABETICAL if sort_order == 1 else SORT_ORDER_MANUAL
+        ),
+        sort_order_is_set=sort_order is not None,
+        new_item_position=(
+            NEW_ITEM_POSITION_TOP
+            if _first_int(fields, 18) == 1
+            else NEW_ITEM_POSITION_BOTTOM
+        ),
+    )
+
+
+def _apply_user_list_settings(
+    shopping_lists: list[ShoppingList], data: bytes
+) -> None:
+    """Apply per-user sort orders from a PBListSettingsList.
+
+    The AnyList apps prefer the sort order stored on the list and fall back to
+    the older per-user setting only while the list has none.
+    """
+    lists_by_id = {shopping_list.id: shopping_list for shopping_list in shopping_lists}
+    for raw_settings in _all_values(_parse_fields(data), 2):
+        if not isinstance(raw_settings, bytes):
+            continue
+        settings = _parse_fields(raw_settings)
+        shopping_list = lists_by_id.get(_first_string(settings, 3) or "")
+        if shopping_list is None or shopping_list.sort_order_is_set:
+            continue
+        if _first_string(settings, 9) == _USER_SORT_ORDER_ALPHABETICAL:
+            shopping_list.sort_order = SORT_ORDER_ALPHABETICAL
+
+
+def _parse_user_data_lists(data: bytes) -> list[ShoppingList]:
+    """Parse the shopping lists in a PBUserDataResponse."""
+    fields = _parse_fields(data)
+    raw_response = _first_value(fields, 1)
+    if not isinstance(raw_response, bytes):
+        return []
+    shopping_lists = _parse_shopping_lists_response(raw_response)
+    raw_settings = _first_value(fields, 9)
+    if isinstance(raw_settings, bytes):
+        _apply_user_list_settings(shopping_lists, raw_settings)
+    return shopping_lists
 
 
 def _parse_shopping_lists_response(data: bytes) -> list[ShoppingList]:
@@ -725,6 +800,7 @@ def _pb_list_operation(
     list_item_id: str | None = None,
     list_item: bytes | None = None,
     updated_value: str | None = None,
+    original_value: str | None = None,
     shopping_list: bytes | None = None,
 ) -> bytes:
     """Build PBListOperation."""
@@ -734,10 +810,16 @@ def _pb_list_operation(
             _field_string(2, list_id),
             _field_string(3, list_item_id),
             _field_string(4, updated_value),
+            _field_string(5, original_value),
             _field_message(6, list_item),
             _field_message(7, shopping_list),
         )
     )
+
+
+def _pb_shopping_list_setting(list_id: str, number: int, value: int) -> bytes:
+    """Build a PBShoppingList carrying one list-level setting."""
+    return _field_string(1, list_id) + _field_int32(number, value)
 
 
 def _pb_list_operation_list(operations: list[bytes]) -> bytes:
@@ -966,12 +1048,7 @@ class AnyListClient:
 
     def get_lists(self) -> list[ShoppingList]:
         """Get all shopping lists."""
-        data = self.get_user_data()
-        fields = _parse_fields(data)
-        raw_response = _first_value(fields, 1)
-        if not isinstance(raw_response, bytes):
-            return []
-        return _parse_shopping_lists_response(raw_response)
+        return _parse_user_data_lists(self.get_user_data())
 
     def get_list_by_id(self, list_id: str) -> ShoppingList:
         """Get a shopping list by ID."""
@@ -1027,9 +1104,11 @@ class AnyListClient:
                 return recipe
         raise AnyListNotFoundError(f"AnyList recipe '{name}' was not found")
 
-    def add_item(self, list_id: str, name: str) -> ListItem:
+    def add_item(self, list_id: str, name: str, at_top: bool = False) -> ListItem:
         """Add an item to a shopping list."""
-        return self.add_item_with_details(list_id, name, None, None, None)
+        return self.add_item_with_details(
+            list_id, name, None, None, None, None, at_top
+        )
 
     def add_item_with_details(
         self,
@@ -1039,8 +1118,14 @@ class AnyListClient:
         details: str | None = None,
         category: str | None = None,
         category_assignment: ItemCategoryAssignment | None = None,
+        at_top: bool = False,
     ) -> ListItem:
-        """Add an item to a shopping list with optional details."""
+        """Add an item to a shopping list with optional details.
+
+        AnyList appends new items unless the operation says otherwise. The apps
+        apply a list's "Insert New Items: At Top" setting by attaching the
+        position to each add operation, so at_top does the same.
+        """
         category_match_id = (
             category_assignment.category_match_id if category_assignment else category
         )
@@ -1063,6 +1148,13 @@ class AnyListClient:
             list_id=list_id,
             list_item_id=item_id,
             list_item=item,
+            shopping_list=(
+                _pb_shopping_list_setting(
+                    list_id, 18, _NEW_ITEM_POSITION_VALUES[NEW_ITEM_POSITION_TOP]
+                )
+                if at_top
+                else None
+            ),
         )
         self.post("data/shopping-lists/update", _pb_list_operation_list([operation]))
         return ListItem(
@@ -1109,6 +1201,91 @@ class AnyListClient:
             list_id=list_id,
             list_item_id=item_id,
             list_item=item,
+        )
+        self.post("data/shopping-lists/update", _pb_list_operation_list([operation]))
+
+    def rename_item(
+        self, list_id: str, item_id: str, name: str, original_name: str | None = None
+    ) -> None:
+        """Rename a list item, leaving its other fields untouched."""
+        operation = _pb_list_operation(
+            handler_id="set-list-item-name",
+            user_id=self._user_id,
+            list_id=list_id,
+            list_item_id=item_id,
+            updated_value=name,
+            original_value=original_name,
+        )
+        self.post("data/shopping-lists/update", _pb_list_operation_list([operation]))
+
+    def move_item(
+        self, list_id: str, item_id: str, previous_item_id: str | None = None
+    ) -> None:
+        """Move a list item directly after another one, or to the top.
+
+        AnyList moves items by index, so the indexes are taken from a fresh
+        copy of the list instead of possibly stale polled data.
+        """
+        item_ids = [item.id for item in self.get_list_by_id(list_id).items]
+        if item_id not in item_ids:
+            raise AnyListNotFoundError(f"AnyList item '{item_id}' was not found")
+
+        from_index = item_ids.index(item_id)
+        item_ids.pop(from_index)
+        if previous_item_id is None:
+            to_index = 0
+        elif previous_item_id in item_ids:
+            # The target is the index the item has once it is back in the list.
+            to_index = item_ids.index(previous_item_id) + 1
+        else:
+            raise AnyListNotFoundError(
+                f"AnyList item '{previous_item_id}' was not found"
+            )
+        if to_index == from_index:
+            return
+
+        operation = _pb_list_operation(
+            handler_id="move-shopping-list-item-to-index",
+            user_id=self._user_id,
+            list_id=list_id,
+            list_item_id=item_id,
+            updated_value=str(to_index),
+            original_value=str(from_index),
+        )
+        self.post("data/shopping-lists/update", _pb_list_operation_list([operation]))
+
+    def set_list_sort_order(self, list_id: str, sort_order: str) -> None:
+        """Set whether a list is sorted manually or alphabetically."""
+        self._set_list_setting(
+            list_id, "set-list-item-sort-order", 17, _SORT_ORDER_VALUES[sort_order]
+        )
+
+    def set_new_item_position(
+        self, list_id: str, position: str, set_manual_sort_order: bool = False
+    ) -> None:
+        """Set whether new items are inserted at the top or bottom of a list.
+
+        The apps also store a manual sort order on a list that has none yet;
+        set_manual_sort_order does the same.
+        """
+        if set_manual_sort_order:
+            self.set_list_sort_order(list_id, SORT_ORDER_MANUAL)
+        self._set_list_setting(
+            list_id,
+            "set-new-list-item-position",
+            18,
+            _NEW_ITEM_POSITION_VALUES[position],
+        )
+
+    def _set_list_setting(
+        self, list_id: str, handler_id: str, number: int, value: int
+    ) -> None:
+        """Write one list-level setting shared by everyone using the list."""
+        operation = _pb_list_operation(
+            handler_id=handler_id,
+            user_id=self._user_id,
+            list_id=list_id,
+            shopping_list=_pb_shopping_list_setting(list_id, number, value),
         )
         self.post("data/shopping-lists/update", _pb_list_operation_list([operation]))
 
@@ -1325,7 +1502,13 @@ class AnyListClient:
     ) -> None:
         """Add a recipe's ingredients to a shopping list."""
         recipe = self.get_recipe_by_id(recipe_id)
-        for ingredient in recipe.ingredients:
+        at_top = any(
+            shopping_list.id == list_id and inserts_new_items_at_top(shopping_list)
+            for shopping_list in self.get_lists()
+        )
+        # Like the apps, add in reverse at the top to keep the recipe's order.
+        ingredients = reversed(recipe.ingredients) if at_top else recipe.ingredients
+        for ingredient in ingredients:
             quantity = ingredient.quantity
             if quantity is not None and scale_factor is not None:
                 quantity = _scale_quantity(quantity, scale_factor)
@@ -1336,6 +1519,8 @@ class AnyListClient:
                 quantity,
                 ingredient.note,
                 None,
+                None,
+                at_top,
             )
 
     def enable_icalendar(self) -> ICalendarInfo:

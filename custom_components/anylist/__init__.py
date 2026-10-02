@@ -22,7 +22,7 @@ from homeassistant.exceptions import (
     ConfigEntryNotReady,
     HomeAssistantError,
 )
-from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import config_validation as cv, device_registry as dr
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .client import (
@@ -74,6 +74,7 @@ from .const import (
     SERVICE_SEARCH_RECIPES,
     SERVICE_UPDATE_RECIPE,
 )
+from .entity import account_device_info, selected_list_ids
 from .recipe_search import (
     DEFAULT_SEARCH_LIMIT,
     MAX_SEARCH_LIMIT,
@@ -84,7 +85,7 @@ from .recipe_search import (
 _LOGGER = logging.getLogger(__name__)
 
 # Base platforms always loaded
-BASE_PLATFORMS: list[Platform] = [Platform.TODO]
+BASE_PLATFORMS: list[Platform] = [Platform.SELECT, Platform.TODO]
 
 
 @dataclass(slots=True)
@@ -1040,6 +1041,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
+    # Shopping list devices are reached through the account device.
+    dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id, **account_device_info(entry)
+    )
+    _async_remove_stale_devices(hass, entry, coordinator.data.get("lists", []))
+
     platforms = get_platforms(entry)
     await hass.config_entries.async_forward_entry_setups(entry, platforms)
     _LOGGER.debug(
@@ -1049,6 +1056,55 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
 
     return True
+
+
+def _list_id_from_device(entry: ConfigEntry, device: dr.DeviceEntry) -> str | None:
+    """Return the shopping list ID a device stands for, if it is a list device."""
+    prefix = f"{entry.entry_id}_"
+    for domain, identifier in device.identifiers:
+        if domain == DOMAIN and identifier.startswith(prefix):
+            return identifier.removeprefix(prefix)
+    return None
+
+
+def _async_remove_stale_devices(
+    hass: HomeAssistant, entry: ConfigEntry, lists: list[Any]
+) -> None:
+    """Remove devices of lists that were deselected or no longer exist."""
+    selected_lists = selected_list_ids(entry)
+    current_list_ids = {shopping_list.id for shopping_list in lists}
+    device_registry = dr.async_get(hass)
+    for device in dr.async_entries_for_config_entry(device_registry, entry.entry_id):
+        list_id = _list_id_from_device(entry, device)
+        if list_id is None:
+            continue
+        deselected = bool(selected_lists) and list_id not in selected_lists
+        # An empty response is not trusted as proof that every list was deleted.
+        deleted = bool(current_list_ids) and list_id not in current_list_ids
+        if deselected or deleted:
+            device_registry.async_remove_device(device.id)
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, entry: ConfigEntry, device: dr.DeviceEntry
+) -> bool:
+    """Allow removing the device of a list that is no longer provided."""
+    list_id = _list_id_from_device(entry, device)
+    if list_id is None:
+        return False
+
+    runtime_data = getattr(entry, "runtime_data", None)
+    lists = (
+        (runtime_data.coordinator.data or {}).get("lists", [])
+        if runtime_data is not None
+        else []
+    )
+    selected_lists = selected_list_ids(entry)
+    return not any(
+        shopping_list.id == list_id
+        and (not selected_lists or list_id in selected_lists)
+        for shopping_list in lists
+    )
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
