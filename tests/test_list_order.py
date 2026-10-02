@@ -27,6 +27,7 @@ from custom_components.anylist.const import (
     CONF_SELECTED_LISTS,
     DOMAIN,
 )
+from custom_components.anylist.entity import account_device_link
 from custom_components.anylist.select import (
     AnyListNewItemPositionSelect,
     AnyListSortOrderSelect,
@@ -589,6 +590,29 @@ async def test_each_list_has_its_own_device(hass: HomeAssistant) -> None:
         for entity in er.async_entries_for_device(entity_registry, list_device.id)
     } == {TODO_ENTITY, SORT_ORDER_ENTITY, POSITION_ENTITY}
     assert hass.states.get(TODO_ENTITY).name == "AnyList Groceries"
+
+
+async def test_account_device_link_matches_home_assistant_version(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Home Assistant 2026.8 replaced via_device with via_device_id."""
+    entry = _mock_entry()
+    entry.add_to_hass(hass)
+    annotations = dr.DeviceInfo.__annotations__
+
+    monkeypatch.delitem(annotations, "via_device_id", raising=False)
+    assert account_device_link(hass, entry) == {
+        "via_device": (DOMAIN, entry.entry_id)
+    }
+
+    monkeypatch.setitem(annotations, "via_device_id", str)
+    # Without Home Assistant or a registered account device there is no link.
+    assert account_device_link(None, entry) == {}
+    assert account_device_link(hass, entry) == {}
+    account = dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id, identifiers={(DOMAIN, entry.entry_id)}
+    )
+    assert account_device_link(hass, entry) == {"via_device_id": account.id}
 
 
 async def test_existing_todo_entity_moves_to_list_device(hass: HomeAssistant) -> None:

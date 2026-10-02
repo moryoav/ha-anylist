@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import callback
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.update_coordinator import (
@@ -39,6 +39,21 @@ def list_device_name(list_name: str) -> str:
     return f"AnyList {list_name}"
 
 
+def account_device_link(
+    hass: HomeAssistant | None, entry: ConfigEntry
+) -> dict[str, Any]:
+    """Return the device info field linking a list device to the account device."""
+    # Home Assistant 2026.8 replaced via_device with via_device_id.
+    if "via_device_id" not in DeviceInfo.__annotations__:
+        return {"via_device": (DOMAIN, entry.entry_id)}
+    if hass is None:
+        return {}
+    account = dr.async_get(hass).async_get_device(
+        identifiers={(DOMAIN, entry.entry_id)}
+    )
+    return {"via_device_id": account.id} if account is not None else {}
+
+
 def selected_list_ids(entry: ConfigEntry) -> list[str]:
     """Return the selected list IDs; an empty list means all lists."""
     return entry.options.get(
@@ -71,16 +86,24 @@ class AnyListListEntity(CoordinatorEntity):
         """Initialize the entity and its shopping list device."""
         super().__init__(coordinator)
         self._client = client
+        self._config_entry = config_entry
         self._list_id = shopping_list.id
+        self._list_name = shopping_list.name
         self._device_identifier = list_device_identifier(config_entry, shopping_list.id)
-        self._attr_device_info = DeviceInfo(
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return the shopping list device, reached through the account device."""
+        return DeviceInfo(
             entry_type=DeviceEntryType.SERVICE,
             identifiers={self._device_identifier},
             manufacturer=MANUFACTURER,
             model="Shopping list",
-            name=list_device_name(shopping_list.name),
-            via_device=(DOMAIN, config_entry.entry_id),
+            name=list_device_name(
+                getattr(self.shopping_list, "name", self._list_name)
+            ),
             configuration_url=CONFIGURATION_URL,
+            **account_device_link(self.hass, self._config_entry),
         )
 
     @property
