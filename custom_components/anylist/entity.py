@@ -39,6 +39,19 @@ def list_device_name(list_name: str) -> str:
     return f"AnyList {list_name}"
 
 
+def get_device(
+    hass: HomeAssistant, entry: ConfigEntry, identifier: tuple[str, str]
+) -> dr.DeviceEntry | None:
+    """Return a device of this config entry by its identifier."""
+    device_registry = dr.async_get(hass)
+    # Home Assistant 2026.8 made identifiers unique per config entry only.
+    if hasattr(device_registry, "async_get_device_by_identifier"):
+        return device_registry.async_get_device_by_identifier(
+            identifier, entry.entry_id
+        )
+    return device_registry.async_get_device(identifiers={identifier})
+
+
 def account_device_link(
     hass: HomeAssistant | None, entry: ConfigEntry
 ) -> dict[str, Any]:
@@ -48,9 +61,7 @@ def account_device_link(
         return {"via_device": (DOMAIN, entry.entry_id)}
     if hass is None:
         return {}
-    account = dr.async_get(hass).async_get_device(
-        identifiers={(DOMAIN, entry.entry_id)}
-    )
+    account = get_device(hass, entry, (DOMAIN, entry.entry_id))
     return {"via_device_id": account.id} if account is not None else {}
 
 
@@ -120,11 +131,8 @@ class AnyListListEntity(CoordinatorEntity):
     def _handle_coordinator_update(self) -> None:
         """Follow list renames made in AnyList, then write the new state."""
         if (shopping_list := self.shopping_list) is not None:
-            device_registry = dr.async_get(self.hass)
-            device = device_registry.async_get_device(
-                identifiers={self._device_identifier}
-            )
+            device = get_device(self.hass, self._config_entry, self._device_identifier)
             name = list_device_name(shopping_list.name)
             if device is not None and device.name != name:
-                device_registry.async_update_device(device.id, name=name)
+                dr.async_get(self.hass).async_update_device(device.id, name=name)
         super()._handle_coordinator_update()

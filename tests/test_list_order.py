@@ -27,7 +27,7 @@ from custom_components.anylist.const import (
     CONF_SELECTED_LISTS,
     DOMAIN,
 )
-from custom_components.anylist.entity import account_device_link
+from custom_components.anylist.entity import account_device_link, get_device
 from custom_components.anylist.select import (
     AnyListNewItemPositionSelect,
     AnyListSortOrderSelect,
@@ -572,13 +572,10 @@ async def test_each_list_has_its_own_device(hass: HomeAssistant) -> None:
     """Every list is a device holding its list and settings, under the account."""
     entry = _mock_entry()
     await _setup(hass, entry, FakeAnyListClient(lists=[fake_list("list-1", "Groceries")]))
-    device_registry = dr.async_get(hass)
     entity_registry = er.async_get(hass)
 
-    account = device_registry.async_get_device(identifiers={(DOMAIN, entry.entry_id)})
-    list_device = device_registry.async_get_device(
-        identifiers={(DOMAIN, f"{entry.entry_id}_list-1")}
-    )
+    account = get_device(hass, entry, (DOMAIN, entry.entry_id))
+    list_device = get_device(hass, entry, (DOMAIN, f"{entry.entry_id}_list-1"))
 
     assert account is not None and account.name == "AnyList"
     assert list_device is not None
@@ -590,6 +587,35 @@ async def test_each_list_has_its_own_device(hass: HomeAssistant) -> None:
         for entity in er.async_entries_for_device(entity_registry, list_device.id)
     } == {TODO_ENTITY, SORT_ORDER_ENTITY, POSITION_ENTITY}
     assert hass.states.get(TODO_ENTITY).name == "AnyList Groceries"
+
+
+async def test_get_device_matches_home_assistant_version(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Home Assistant 2026.8 looks devices up per config entry."""
+    entry = _mock_entry()
+    identifier = (DOMAIN, "device-1")
+    calls: list[tuple[Any, ...]] = []
+
+    monkeypatch.setattr(
+        dr.DeviceRegistry,
+        "async_get_device",
+        lambda self, identifiers: calls.append(("legacy", identifiers)),
+    )
+    monkeypatch.delattr(
+        dr.DeviceRegistry, "async_get_device_by_identifier", raising=False
+    )
+    get_device(hass, entry, identifier)
+
+    monkeypatch.setattr(
+        dr.DeviceRegistry,
+        "async_get_device_by_identifier",
+        lambda self, identifier, entry_id: calls.append(("new", identifier, entry_id)),
+        raising=False,
+    )
+    get_device(hass, entry, identifier)
+
+    assert calls == [("legacy", {identifier}), ("new", identifier, entry.entry_id)]
 
 
 async def test_account_device_link_matches_home_assistant_version(
@@ -640,9 +666,7 @@ async def test_existing_todo_entity_moves_to_list_device(hass: HomeAssistant) ->
     await _setup(hass, entry, FakeAnyListClient(lists=[fake_list("list-1", "Groceries")]))
 
     registered = entity_registry.async_get("todo.my_shopping_list")
-    list_device = device_registry.async_get_device(
-        identifiers={(DOMAIN, f"{entry.entry_id}_list-1")}
-    )
+    list_device = get_device(hass, entry, (DOMAIN, f"{entry.entry_id}_list-1"))
     assert registered is not None and registered.unique_id == "anylist_list-1"
     assert registered.device_id == list_device.id
     assert hass.states.get("todo.my_shopping_list").name == "AnyList Groceries"
@@ -659,9 +683,7 @@ async def test_list_rename_updates_device_name(hass: HomeAssistant) -> None:
     await entry.runtime_data.coordinator.async_refresh()
     await hass.async_block_till_done()
 
-    device = dr.async_get(hass).async_get_device(
-        identifiers={(DOMAIN, f"{entry.entry_id}_list-1")}
-    )
+    device = get_device(hass, entry, (DOMAIN, f"{entry.entry_id}_list-1"))
     assert device.name == "AnyList Weekly shop"
     assert hass.states.get(TODO_ENTITY).name == "AnyList Weekly shop"
 
@@ -721,10 +743,8 @@ async def test_only_stale_list_devices_can_be_removed_manually(
     entry = _mock_entry()
     await _setup(hass, entry, FakeAnyListClient(lists=[fake_list("list-1", "Groceries")]))
     device_registry = dr.async_get(hass)
-    account = device_registry.async_get_device(identifiers={(DOMAIN, entry.entry_id)})
-    active = device_registry.async_get_device(
-        identifiers={(DOMAIN, f"{entry.entry_id}_list-1")}
-    )
+    account = get_device(hass, entry, (DOMAIN, entry.entry_id))
+    active = get_device(hass, entry, (DOMAIN, f"{entry.entry_id}_list-1"))
     leftover = device_registry.async_get_or_create(
         config_entry_id=entry.entry_id,
         identifiers={(DOMAIN, f"{entry.entry_id}_list-gone")},

@@ -1082,9 +1082,7 @@ def _async_remove_stale_devices(
         # An empty response is not trusted as proof that every list was deleted.
         deleted = bool(current_list_ids) and list_id not in current_list_ids
         if deselected or deleted:
-            device_registry.async_update_device(
-                device.id, remove_config_entry_id=entry.entry_id
-            )
+            device_registry.async_remove_device(device.id)
 
 
 async def async_remove_config_entry_device(
