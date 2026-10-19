@@ -19,6 +19,7 @@ URL = f"https://icalendar.anylist.com/{TOKEN}.ics"
 
 
 def _client() -> client_module.AnyListClient:
+    """Build an authenticated client without making network requests."""
     return client_module.AnyListClient(
         access_token="access",
         refresh_token="refresh",
@@ -45,6 +46,7 @@ def test_get_calendar_uses_authenticated_get_and_exact_id(
     calls = []
 
     def fake_request(req, *, timeout):
+        """Capture the request and return a household account response."""
         calls.append(req)
         assert timeout == client_module.ANYLIST_REQUEST_TIMEOUT
         return _account(token)
@@ -65,6 +67,7 @@ def test_get_calendar_uses_authenticated_get_and_exact_id(
 
 @pytest.mark.parametrize("token", [None, ""])
 def test_disabled_calendar_does_not_use_household_id(token: str | None) -> None:
+    """A missing calendar ID must not be replaced with a household user ID."""
     info = client_module._parse_icalendar_info(_account(token))
     assert info.enabled is False
     assert info.token is None
@@ -85,6 +88,7 @@ def test_disabled_calendar_does_not_use_household_id(token: str | None) -> None:
     ],
 )
 def test_invalid_account_response_is_not_treated_as_disabled(response: bytes) -> None:
+    """Reject malformed and failed reads before setup can enable sharing."""
     with pytest.raises(client_module.AnyListError):
         client_module._parse_icalendar_info(response)
 
@@ -92,7 +96,10 @@ def test_invalid_account_response_is_not_treated_as_disabled(response: bytes) ->
 def test_enable_calendar_decodes_nested_account_response(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Read the calendar ID from a successful enable response."""
+
     def fake_post(endpoint, field_name, body):
+        """Check the enable request and return its nested account response."""
         assert endpoint == "/data/meal-planning-calendar/set-icalendar-enabled"
         assert field_name == "icalendar_request"
         assert body == client_module._field_bool(1, True)
@@ -119,6 +126,7 @@ def test_enable_calendar_decodes_nested_account_response(
 def test_enable_calendar_rejects_unsuccessful_response(
     monkeypatch: pytest.MonkeyPatch, response: bytes
 ) -> None:
+    """Do not report enabled export without a successful calendar response."""
     client = _client()
     monkeypatch.setattr(client, "post_multipart", lambda *args: response)
     with pytest.raises(client_module.AnyListError):
@@ -128,16 +136,19 @@ def test_enable_calendar_rejects_unsuccessful_response(
 def test_calendar_get_refreshes_expired_auth_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Retry the read with refreshed credentials after an expired token."""
     client = _client()
     calls = []
 
     def fake_request(req, *, timeout):
+        """Reject the first token and accept the refreshed token."""
         calls.append(req.get_header("Authorization"))
         if len(calls) == 1:
             raise client_module.AnyListHTTPError(401, "expired")
         return _account()
 
     def refresh():
+        """Replace the expired token without making an authentication request."""
         client._access_token = "new-access"
 
     monkeypatch.setattr(client, "_request", fake_request)
@@ -150,6 +161,7 @@ def test_calendar_get_refreshes_expired_auth_once(
 def test_calendar_get_does_not_retry_indefinitely(
     monkeypatch: pytest.MonkeyPatch, status: int
 ) -> None:
+    """Refresh only a 401 and propagate a second failure to the caller."""
     client = _client()
     with (
         patch.object(
@@ -166,6 +178,7 @@ def test_calendar_get_does_not_retry_indefinitely(
 
 
 async def test_existing_calendar_survives_setup_and_reload(hass: HomeAssistant) -> None:
+    """Keep an existing subscription across setup and an entry reload."""
     entry = _mock_entry(
         options={CONF_SELECTED_LISTS: ["list-1"], CONF_MEAL_PLAN_CALENDAR: True}
     )
@@ -185,6 +198,7 @@ async def test_existing_calendar_survives_setup_and_reload(hass: HomeAssistant) 
 
 
 async def test_disabled_calendar_is_enabled_only_once(hass: HomeAssistant) -> None:
+    """Enable a disabled export once and reuse it on the next setup."""
     entry = _mock_entry(
         options={CONF_SELECTED_LISTS: ["list-1"], CONF_MEAL_PLAN_CALENDAR: True}
     )
@@ -218,6 +232,7 @@ async def test_disabled_calendar_is_enabled_only_once(hass: HomeAssistant) -> No
 async def test_calendar_read_failure_never_enables_export(
     hass: HomeAssistant, failure: Exception
 ) -> None:
+    """Keep lists available and calendar sharing untouched after a read failure."""
     entry = _mock_entry(
         options={CONF_SELECTED_LISTS: ["list-1"], CONF_MEAL_PLAN_CALENDAR: True}
     )
