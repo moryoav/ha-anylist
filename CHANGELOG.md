@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.1 - 2026-10-19
+
+- Preserve the existing meal plan calendar subscription URL when Home Assistant
+  starts or the integration reloads. Enable calendar sharing only when it is
+  confirmed disabled.
+- Read the calendar ID from its response field so household member IDs cannot
+  produce an invalid calendar URL. Thanks to [@doctorkb](https://github.com/doctorkb)
+  for reporting [#7](https://github.com/moryoav/ha-anylist/issues/7).
+
 ## 0.8.0 - 2026-10-02
 
 - Honour the list's **Insert New Items** setting when Home Assistant adds an

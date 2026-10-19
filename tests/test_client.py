@@ -249,23 +249,21 @@ def test_client_recipe_mutations_write_expected_operations() -> None:
 
 
 def test_client_enable_icalendar_extracts_token() -> None:
-    """Test iCalendar token extraction variants."""
+    """Read the calendar ID from the nested account response."""
     client = _client()
     token = "11111111111111111111111111111111"
-    client.post_multipart = lambda endpoint, field_name, body: token.encode()
+    account = client_module._field_int32(1, 0) + client_module._field_string(12, token)
+    response = (
+        client_module._field_int32(1, 0)
+        + client_module._field_message(2, account)
+    )
+    client.post_multipart = lambda endpoint, field_name, body: response
 
     info = client.enable_icalendar()
 
     assert info.enabled is True
     assert info.token == token
     assert info.url == f"https://icalendar.anylist.com/{token}.ics"
-    assert client_module._extract_icalendar_token(b"") is None
-    assert (
-        client_module._extract_icalendar_token(
-            b"95400000000000000000000000000000"
-        )
-        == "95400000000000000000000000000000"
-    )
 
 
 def test_client_login_and_token_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -339,7 +337,6 @@ def test_client_post_multipart_refreshes_after_401(monkeypatch: pytest.MonkeyPat
 
 def test_client_transport_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test multipart transport success and error handling."""
-    client = _client()
     body, content_type = client_module._encode_multipart(
         fields={"email": "user@example.com"},
         files={"operations": b"body"},

@@ -114,6 +114,9 @@ These settings are stored on the list in AnyList, not in Home Assistant. A chang
 
 If the meal plan option is enabled, the integration creates a diagnostic sensor named **Meal plan iCalendar URL**. Use that URL with Home Assistant's built-in [iCal integration](https://www.home-assistant.io/integrations/ical/) to display AnyList meal planning events as a calendar.
 
+Existing calendar subscription URLs are preserved across restarts and reloads.
+The integration enables calendar sharing only when it is currently disabled.
+
 ### Service Actions
 
 Recipe support is exposed through Home Assistant actions for automations, scripts, and Node-RED flows:
