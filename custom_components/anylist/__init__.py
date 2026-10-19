@@ -1007,16 +1007,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         try:
             info = await async_call_with_timeout(
                 hass,
-                client.enable_icalendar,
+                client.get_icalendar_info,
                 timeout=ANYLIST_REQUEST_TIMEOUT,
             )
+            if not info.enabled:
+                info = await async_call_with_timeout(
+                    hass,
+                    client.enable_icalendar,
+                    timeout=ANYLIST_REQUEST_TIMEOUT,
+                )
             icalendar_url = info.url
             if icalendar_url:
-                _LOGGER.info("AnyList meal plan calendar enabled: %s", icalendar_url)
+                _LOGGER.debug("AnyList meal plan calendar URL retrieved")
             else:
                 _LOGGER.warning("Failed to get iCalendar URL from AnyList")
         except Exception as err:
-            _LOGGER.warning("Failed to enable iCalendar: %s", err)
+            _LOGGER.warning("Failed to get iCalendar URL: %s", err)
 
     async def async_update_data() -> dict[str, Any]:
         """Fetch data from AnyList."""

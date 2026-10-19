@@ -327,6 +327,8 @@ def _parse_fields(data: bytes) -> dict[int, list[tuple[int, Any]]]:
         else:
             raise AnyListError(f"Unsupported protobuf wire type {wire_type}")
 
+        if index > len(data):
+            raise AnyListError("Unexpected end of protobuf field")
         fields.setdefault(number, []).append((wire_type, value))
     return fields
 
@@ -960,15 +962,28 @@ def _decode_error_body(body: bytes) -> str:
     return body[:500].decode("utf-8", errors="replace")
 
 
-def _extract_icalendar_token(data: bytes) -> str | None:
-    """Extract an AnyList iCalendar token from a response body."""
-    text = data.decode("utf-8", errors="ignore")
-    matches = list(_ICALENDAR_TOKEN_RE.finditer(text))
-    for match in matches:
-        token = match.group(0)
-        if not token.startswith("9540"):
-            return token
-    return matches[-1].group(0) if matches else None
+def _parse_icalendar_info(data: bytes) -> ICalendarInfo:
+    """Read PBAccountInfoResponse.icalendarId without matching household IDs."""
+    fields = _parse_fields(data)
+    if _first_int(fields, 1) != 0:
+        raise AnyListError("AnyList calendar account information was not successful")
+
+    raw_token = _first_value(fields, 12)
+    if raw_token is None or raw_token == b"":
+        return ICalendarInfo(enabled=False, url=None, token=None)
+    if not isinstance(raw_token, bytes):
+        raise AnyListError("AnyList returned an invalid calendar ID")
+    try:
+        token = raw_token.decode("ascii")
+    except UnicodeDecodeError as err:
+        raise AnyListError("AnyList returned an invalid calendar ID") from err
+    if not _ICALENDAR_TOKEN_RE.fullmatch(token):
+        raise AnyListError("AnyList returned an invalid calendar ID")
+    return ICalendarInfo(
+        enabled=True,
+        url=f"https://icalendar.anylist.com/{token}.ics",
+        token=token,
+    )
 
 
 def _scale_quantity(quantity: str, scale: float) -> str:
@@ -1523,6 +1538,17 @@ class AnyListClient:
                 at_top,
             )
 
+    def get_icalendar_info(self) -> ICalendarInfo:
+        """Read the existing calendar export without changing sharing settings."""
+        try:
+            response = self._authenticated_get("/data/account/info")
+        except AnyListHTTPError as err:
+            if err.status != 401:
+                raise
+            self._refresh_tokens()
+            response = self._authenticated_get("/data/account/info")
+        return _parse_icalendar_info(response)
+
     def enable_icalendar(self) -> ICalendarInfo:
         """Enable iCalendar export for meal planning."""
         body = _field_bool(1, True)
@@ -1531,12 +1557,16 @@ class AnyListClient:
             "icalendar_request",
             body,
         )
-        token = _extract_icalendar_token(response)
-        return ICalendarInfo(
-            enabled=True,
-            url=f"https://icalendar.anylist.com/{token}.ics" if token else None,
-            token=token,
-        )
+        fields = _parse_fields(response)
+        if _first_int(fields, 1) != 0:
+            raise AnyListError("AnyList did not enable calendar export")
+        account_info = _first_value(fields, 2)
+        if not isinstance(account_info, bytes):
+            raise AnyListError("AnyList returned no calendar account information")
+        info = _parse_icalendar_info(account_info)
+        if not info.enabled:
+            raise AnyListError("AnyList returned no calendar ID after enabling export")
+        return info
 
     def get_user_data(self) -> bytes:
         """Get raw user data from AnyList."""
@@ -1575,6 +1605,15 @@ class AnyListClient:
             updated_value="y" if checked else "n",
         )
         self.post("data/shopping-lists/update", _pb_list_operation_list([operation]))
+
+    def _authenticated_get(self, endpoint: str) -> bytes:
+        """Read an authenticated endpoint with the normal request timeout."""
+        headers = self._base_headers(self._client_identifier)
+        headers["Authorization"] = f"Bearer {self._access_token}"
+        req = request.Request(
+            f"{_API_BASE_URL}{endpoint}", headers=headers, method="GET"
+        )
+        return self._request(req, timeout=ANYLIST_REQUEST_TIMEOUT)
 
     def _authenticated_multipart(
         self,
@@ -1648,7 +1687,11 @@ class AnyListClient:
             headers=request_headers,
             method="POST",
         )
+        return AnyListClient._request(req, timeout=timeout)
 
+    @staticmethod
+    def _request(req: request.Request, *, timeout: float) -> bytes:
+        """Send a request with shared HTTP error handling and a socket timeout."""
         try:
             with request.urlopen(req, timeout=timeout) as response:
                 status = response.status

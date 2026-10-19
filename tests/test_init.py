@@ -64,6 +64,7 @@ def test_local_client_import():
     assert AnyListClient is not None
     assert hasattr(AnyListClient, "login")
     assert hasattr(AnyListClient, "get_lists")
+    assert hasattr(AnyListClient, "get_icalendar_info")
     assert hasattr(AnyListClient, "enable_icalendar")
     assert hasattr(AnyListClient, "get_recipes")
     assert hasattr(AnyListClient, "get_recipe_by_id")

@@ -66,6 +66,15 @@ class FakeAnyListClient:
         self.calls.append(("get_favourites", ()))
         return self.favourites
 
+    def get_icalendar_info(self) -> Any:
+        """Return an existing fake iCalendar URL without enabling export."""
+        self.calls.append(("get_icalendar_info", ()))
+        return SimpleNamespace(
+            enabled=True,
+            url="https://icalendar.anylist.com/redacted.ics",
+            token="redacted",
+        )
+
     def enable_icalendar(self) -> Any:
         """Return a fake iCalendar URL."""
         self.calls.append(("enable_icalendar", ()))

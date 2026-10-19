@@ -284,7 +284,8 @@ async def test_setup_entry_enables_meal_plan_sensor(
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
 
-    assert ("enable_icalendar", ()) in client.calls
+    assert ("get_icalendar_info", ()) in client.calls
+    assert ("enable_icalendar", ()) not in client.calls
     sensor_state = hass.states.get("sensor.anylist_meal_plan_icalendar_url")
     assert sensor_state is not None
     assert sensor_state.state == "https://icalendar.anylist.com/redacted.ics"
