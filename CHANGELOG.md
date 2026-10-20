@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.2 - 2026-10-20
+
+- Refresh shopping list data immediately after changes so consecutive actions,
+  such as adding an item and marking it completed, use the updated list.
+- Report failed post-change refreshes instead of returning stale shopping list
+  data as if the change had been read back successfully.
+
 ## 0.8.1 - 2026-10-19
 
 - Preserve the existing meal plan calendar subscription URL when Home Assistant

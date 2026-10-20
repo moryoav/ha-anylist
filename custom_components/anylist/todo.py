@@ -329,7 +329,7 @@ class AnyListTodoEntity(AnyListListEntity, TodoListEntity):
                     item.summary,
                     at_top,
                 )
-                await self.coordinator.async_request_refresh()
+                await self._async_refresh_after_mutation()
                 return
 
             await self._async_call_client(
@@ -347,7 +347,7 @@ class AnyListTodoEntity(AnyListListEntity, TodoListEntity):
                 ),
                 at_top,
             )
-        await self.coordinator.async_request_refresh()
+        await self._async_refresh_after_mutation()
 
     def _find_checked_item_by_name(self, name: str) -> TodoItem | None:
         """Find an existing checked-off item by name (case insensitive)."""
@@ -385,7 +385,7 @@ class AnyListTodoEntity(AnyListListEntity, TodoListEntity):
                 current.summary,
             )
             if item.status == current.status:
-                await self.coordinator.async_request_refresh()
+                await self._async_refresh_after_mutation()
                 return
 
         if item.status == TodoItemStatus.COMPLETED:
@@ -402,7 +402,7 @@ class AnyListTodoEntity(AnyListListEntity, TodoListEntity):
                 self._list_id,
                 item.uid,
             )
-        await self.coordinator.async_request_refresh()
+        await self._async_refresh_after_mutation()
 
     async def async_delete_todo_items(self, uids: list[str]) -> None:
         """Delete items from the list."""
@@ -412,7 +412,7 @@ class AnyListTodoEntity(AnyListListEntity, TodoListEntity):
             self._list_id,
             uids,
         )
-        await self.coordinator.async_request_refresh()
+        await self._async_refresh_after_mutation()
 
     async def async_move_todo_item(
         self, uid: str, previous_uid: str | None = None
@@ -425,7 +425,25 @@ class AnyListTodoEntity(AnyListListEntity, TodoListEntity):
             uid,
             previous_uid,
         )
-        await self.coordinator.async_request_refresh()
+        await self._async_refresh_after_mutation()
+
+    async def _async_refresh_after_mutation(self) -> None:
+        """Publish the write before a following todo service reads cached items."""
+        # A debounced request can return during its cooldown without fetching.
+        # That leaves just-created items missing from the next update/remove
+        # service, or exposes stale completion states to synchronization.
+        await self.coordinator.async_refresh()
+        if not self.coordinator.last_update_success:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="refresh_failed",
+                translation_placeholders={
+                    "error": str(
+                        self.coordinator.last_exception
+                        or "Unable to read back the AnyList update"
+                    )
+                },
+            )
 
     async def _async_call_client(self, action: str, func, *args) -> None:
         """Run a todo mutation with logging and timeout protection."""
