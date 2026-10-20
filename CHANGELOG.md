@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.0 - 2026-10-20
+
+- Add `anylist.add_item` and `anylist.update_item` actions with separate quantity
+  and notes fields. Target an AnyList to-do entity in automations or scripts.
+- Preserve omitted fields, item categories, and checked states during updates.
+  Empty strings clear fields, and adding a checked item reuses it.
+- Read current AnyList quantity data, including units, while keeping the combined
+  description read only in the Home Assistant to-do editor. Thanks to
+  [@KyleLichtenberg](https://github.com/KyleLichtenberg) for suggesting
+  [#9](https://github.com/moryoav/ha-anylist/issues/9).
+
 ## 0.8.2 - 2026-10-20
 
 - Refresh shopping list data immediately after changes so consecutive actions,

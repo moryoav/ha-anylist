@@ -23,6 +23,7 @@ from homeassistant.exceptions import (
     HomeAssistantError,
 )
 from homeassistant.helpers import config_validation as cv, device_registry as dr
+from homeassistant.helpers.service import async_register_platform_entity_service
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .client import (
@@ -47,11 +48,13 @@ from .const import (
     ATTR_INGREDIENTS,
     ATTR_INCLUDE_INGREDIENTS,
     ATTR_INCLUDE_STEPS,
+    ATTR_ITEM,
     ATTR_LIMIT,
     ATTR_LIST_ID,
     ATTR_LIST_NAME,
     ATTR_NAME,
     ATTR_NOTE,
+    ATTR_NOTES,
     ATTR_PREPARATION_STEPS,
     ATTR_QUERY,
     ATTR_QUANTITY,
@@ -65,6 +68,7 @@ from .const import (
     CONF_POLL_INTERVAL,
     CONF_SELECTED_LISTS,
     DOMAIN,
+    SERVICE_ADD_ITEM,
     SERVICE_ADD_RECIPE_TO_LIST,
     SERVICE_CREATE_RECIPE,
     SERVICE_DELETE_RECIPE,
@@ -73,6 +77,7 @@ from .const import (
     SERVICE_REFRESH,
     SERVICE_SEARCH_RECIPES,
     SERVICE_UPDATE_RECIPE,
+    SERVICE_UPDATE_ITEM,
 )
 from .entity import account_device_info, selected_list_ids
 from .recipe_search import (
@@ -938,6 +943,30 @@ def _async_register_services(hass: HomeAssistant) -> None:
 async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
     """Set up the AnyList integration."""
     _async_register_services(hass)
+    async_register_platform_entity_service(
+        hass,
+        DOMAIN,
+        SERVICE_ADD_ITEM,
+        entity_domain=Platform.TODO,
+        schema={
+            vol.Required(ATTR_NAME): cv.string,
+            vol.Optional(ATTR_QUANTITY): cv.string,
+            vol.Optional(ATTR_NOTES): cv.string,
+        },
+        func="async_add_item",
+    )
+    async_register_platform_entity_service(
+        hass,
+        DOMAIN,
+        SERVICE_UPDATE_ITEM,
+        entity_domain=Platform.TODO,
+        schema={
+            vol.Required(ATTR_ITEM): cv.string,
+            vol.Optional(ATTR_QUANTITY): cv.string,
+            vol.Optional(ATTR_NOTES): cv.string,
+        },
+        func="async_update_item",
+    )
     return True
 
 

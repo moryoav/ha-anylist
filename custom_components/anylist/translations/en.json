@@ -162,6 +162,18 @@
     },
     "empty_search_query": {
       "message": "Recipe search query must contain at least one letter or number."
+    },
+    "empty_item_name": {
+      "message": "Item name must not be blank."
+    },
+    "item_fields_required": {
+      "message": "Supply quantity or notes. Use an empty string to clear a field."
+    },
+    "todo_item_not_found": {
+      "message": "The item was not found in this AnyList shopping list."
+    },
+    "ambiguous_todo_item": {
+      "message": "Multiple matching items were found. Use anylist.update_item with an item UID from todo.get_items."
     }
   },
   "services": {
@@ -232,6 +244,42 @@
         "include_steps": {
           "name": "Include preparation steps",
           "description": "Include preparation steps in the returned recipe."
+        }
+      }
+    },
+    "add_item": {
+      "name": "Add item",
+      "description": "Add an item with separate quantity and notes. Reuse a matching checked item and preserve any omitted fields on that item.",
+      "fields": {
+        "name": {
+          "name": "Name",
+          "description": "Item name without quantity or notes. A checked item with the same name is reused, ignoring case."
+        },
+        "quantity": {
+          "name": "Quantity",
+          "description": "Quantity text, such as 2 or 2 kg. Omit to preserve a reused item's quantity. Use an empty string to clear it."
+        },
+        "notes": {
+          "name": "Notes",
+          "description": "Item notes. Omit to preserve a reused item's notes. Use an empty string to clear them."
+        }
+      }
+    },
+    "update_item": {
+      "name": "Update item",
+      "description": "Change quantity or notes without changing the item's name, category, or checked state. Supply at least one field.",
+      "fields": {
+        "item": {
+          "name": "Item",
+          "description": "Item UID from todo.get_items, or an exact, case-sensitive item name. Use a UID if names are duplicated."
+        },
+        "quantity": {
+          "name": "Quantity",
+          "description": "New quantity text. Omit to keep the current value. Use an empty string to clear it."
+        },
+        "notes": {
+          "name": "Notes",
+          "description": "New notes. Omit to keep the current value. Use an empty string to clear them."
         }
       }
     }

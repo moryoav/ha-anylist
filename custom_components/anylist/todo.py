@@ -1,6 +1,7 @@
 """Todo platform for AnyList integration."""
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -14,7 +15,7 @@ from homeassistant.components.todo import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
@@ -106,6 +107,7 @@ class AnyListTodoEntity(AnyListListEntity, TodoListEntity):
         """Initialize the todo entity."""
         super().__init__(coordinator, client, shopping_list, config_entry)
         self._attr_unique_id = f"anylist_{shopping_list.id}"
+        self._item_action_lock = asyncio.Lock()
 
     @property
     def supported_features(self) -> TodoListEntityFeature:
@@ -293,10 +295,95 @@ class AnyListTodoEntity(AnyListListEntity, TodoListEntity):
         checked-off item with the same name and reuse it by unchecking instead
         of creating a duplicate.
         """
+        await self._async_create_item(item)
+
+    async def async_add_item(
+        self, name: str, quantity: str | None = None, notes: str | None = None
+    ) -> None:
+        """Add an item with separate quantity/notes, reusing a checked match.
+
+        Omitted fields retain their values when a checked item is reused;
+        supplied empty strings clear them. The description stays read only.
+        """
+        if not name.strip():
+            raise ServiceValidationError(
+                translation_domain=DOMAIN, translation_key="empty_item_name"
+            )
+        async with self._item_action_lock:
+            await self._async_refresh_list()
+            matches = [
+                item for item in self.shopping_list.items
+                if item.is_checked and item.name.lower() == name.lower()
+            ]
+            if len(matches) > 1:
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="ambiguous_todo_item",
+                )
+            await self._async_create_item(
+                TodoItem(summary=name, description=notes), quantity
+            )
+
+    async def async_update_item(
+        self, item: str, quantity: str | None = None, notes: str | None = None
+    ) -> None:
+        """Update one item by UID or exact name without changing other fields.
+
+        At least one field must be supplied. Omitted fields are preserved and
+        empty strings clear fields. Duplicate names require a UID.
+        """
+        if quantity is None and notes is None:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN, translation_key="item_fields_required"
+            )
+        async with self._item_action_lock:
+            await self._async_refresh_list()
+            items = self.shopping_list.items
+            matches = [candidate for candidate in items if candidate.id == item]
+            if not matches:
+                matches = [candidate for candidate in items if candidate.name == item]
+            if not matches:
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN, translation_key="todo_item_not_found"
+                )
+            if len(matches) > 1:
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN, translation_key="ambiguous_todo_item"
+                )
+            current = matches[0]
+            await self._async_call_client(
+                "update todo quantity and notes",
+                self._client.update_item_details,
+                self._list_id,
+                current.id,
+                quantity,
+                notes,
+                current.details,
+            )
+            await self._async_refresh_list()
+
+    async def _async_create_item(
+        self, item: TodoItem, quantity: str | None = None
+    ) -> None:
+        """Share category, insertion-order, and checked-item reuse behavior."""
         # Check for existing checked-off item with same name (case insensitive)
         existing_item = self._find_checked_item_by_name(item.summary) if item.summary else None
 
         if existing_item:
+            if quantity is not None or item.description is not None:
+                current = next(
+                    candidate for candidate in self.shopping_list.items
+                    if candidate.id == existing_item.uid
+                )
+                await self._async_call_client(
+                    "update reused todo quantity and notes",
+                    self._client.update_item_details,
+                    self._list_id,
+                    current.id,
+                    quantity,
+                    item.description,
+                    current.details,
+                )
             # Reuse existing item by unchecking it
             _LOGGER.debug(
                 "Reusing existing checked item '%s' instead of creating duplicate",
@@ -321,7 +408,7 @@ class AnyListTodoEntity(AnyListListEntity, TodoListEntity):
                 find_shopping_list(self.coordinator, self._list_id)
             )
 
-            if not item.description and category_resolution is None:
+            if not item.description and quantity is None and category_resolution is None:
                 await self._async_call_client(
                     "create todo item",
                     self._client.add_item,
@@ -337,7 +424,7 @@ class AnyListTodoEntity(AnyListListEntity, TodoListEntity):
                 self._client.add_item_with_details,
                 self._list_id,
                 item.summary,
-                None,  # quantity
+                quantity,
                 item.description,  # details
                 category_resolution.category if category_resolution else None,
                 (
@@ -427,8 +514,8 @@ class AnyListTodoEntity(AnyListListEntity, TodoListEntity):
         )
         await self._async_refresh_after_mutation()
 
-    async def _async_refresh_after_mutation(self) -> None:
-        """Publish the write before a following todo service reads cached items."""
+    async def _async_refresh_list(self) -> None:
+        """Fetch an immediate snapshot and report failed readback explicitly."""
         # A debounced request can return during its cooldown without fetching.
         # That leaves just-created items missing from the next update/remove
         # service, or exposes stale completion states to synchronization.
@@ -444,6 +531,16 @@ class AnyListTodoEntity(AnyListListEntity, TodoListEntity):
                     )
                 },
             )
+        if self.shopping_list is None:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="shopping_list_not_found",
+                translation_placeholders={"identifier": self._list_id},
+            )
+
+    async def _async_refresh_after_mutation(self) -> None:
+        """Publish the write before a following todo service reads cached items."""
+        await self._async_refresh_list()
 
     async def _async_call_client(self, action: str, func, *args) -> None:
         """Run a todo mutation with logging and timeout protection."""

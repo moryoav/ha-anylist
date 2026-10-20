@@ -393,12 +393,27 @@ def _parse_list_item(data: bytes, fallback_list_id: str | None = None) -> ListIt
         name=name,
         details=_first_string(fields, 5) or "",
         is_checked=_first_bool(fields, 6),
-        quantity=_first_string(fields, 18),
+        quantity=_parse_item_quantity(fields),
         category=_first_string(fields, 13) or _first_string(fields, 11),
         category_assignment=category_assignment,
         user_id=_first_string(fields, 12),
         product_upc=_first_string(fields, 30),
     )
+
+
+def _parse_item_quantity(fields: dict[int, list[tuple[int, Any]]]) -> str | None:
+    """Read the current quantity message, falling back to the legacy string."""
+    quantity = _first_value(fields, 21)
+    if not isinstance(quantity, bytes):
+        return _first_string(fields, 18)
+    quantity_fields = _parse_fields(quantity)
+    raw = _first_string(quantity_fields, 3)
+    if raw is not None:
+        return raw
+    return " ".join(
+        value for number in (1, 2)
+        if (value := _first_string(quantity_fields, number))
+    ) or None
 
 
 def _parse_list_category(
@@ -760,6 +775,21 @@ def _pb_list_item_category_assignment(
     )
 
 
+def _pb_item_quantity(quantity: str) -> bytes:
+    """Keep quantity text verbatim and expose common amounts to AnyList totals.
+
+    PBItemQuantity has amount, unit, and rawQuantity string fields. The raw text
+    is authoritative for display, including quantities the app cannot parse.
+    """
+    fields = [_field_string(3, quantity)]
+    match = re.fullmatch(
+        r"(\d+\s+\d+/\d+|\d+/\d+|\d+(?:\.\d+)?)(?:\s+(.+))?", quantity
+    )
+    if match:
+        fields.extend((_field_string(1, match[1]), _field_string(2, match[2])))
+    return b"".join(fields)
+
+
 def _pb_list_item(
     *,
     item_id: str,
@@ -782,6 +812,7 @@ def _pb_list_item(
             _field_string(3, list_id),
             _field_string(4, name),
             _field_string(18, quantity),
+            _field_message(21, _pb_item_quantity(quantity) if quantity is not None else None),
             _field_string(5, details),
             _field_bool(6, checked),
             _field_string(11, category),
@@ -1183,6 +1214,46 @@ class AnyListClient:
             category_assignment=category_assignment,
             user_id=self._user_id,
         )
+
+    def update_item_details(
+        self,
+        list_id: str,
+        item_id: str,
+        quantity: str | None = None,
+        details: str | None = None,
+        original_details: str | None = None,
+    ) -> None:
+        """Change only supplied quantity/notes fields; empty strings clear them.
+
+        These are the web app's field-specific operations. Avoid rebuilding a
+        whole item, which could reset its checked state or discard metadata.
+        """
+        operations = []
+        if quantity is not None:
+            item = b"".join((
+                _field_string(1, item_id),
+                _field_string(3, list_id),
+                _field_string(18, quantity),
+                _field_message(21, _pb_item_quantity(quantity)),
+            ))
+            operations.append(_pb_list_operation(
+                handler_id="set-list-item-quantity-v2",
+                user_id=self._user_id,
+                list_id=list_id,
+                list_item_id=item_id,
+                list_item=item,
+            ))
+        if details is not None:
+            operations.append(_pb_list_operation(
+                handler_id="set-list-item-details",
+                user_id=self._user_id,
+                list_id=list_id,
+                list_item_id=item_id,
+                updated_value=details,
+                original_value=original_details,
+            ))
+        if operations:
+            self.post("data/shopping-lists/update", _pb_list_operation_list(operations))
 
     def update_item(
         self,
