@@ -24,6 +24,8 @@ ANYLIST_MAX_POLL_INTERVAL = 3600  # seconds
 
 # Services
 SERVICE_REFRESH = "refresh"
+SERVICE_ADD_ITEM = "add_item"
+SERVICE_UPDATE_ITEM = "update_item"
 SERVICE_GET_RECIPES = "get_recipes"
 SERVICE_SEARCH_RECIPES = "search_recipes"
 SERVICE_GET_RECIPE = "get_recipe"
@@ -43,6 +45,8 @@ ATTR_RECIPE_NAME = "recipe_name"
 ATTR_LIST_ID = "list_id"
 ATTR_LIST_NAME = "list_name"
 ATTR_NAME = "name"
+ATTR_ITEM = "item"
+ATTR_NOTES = "notes"
 ATTR_IMAGE_URL = "image_url"
 ATTR_INGREDIENTS = "ingredients"
 ATTR_PREPARATION_STEPS = "preparation_steps"

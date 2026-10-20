@@ -19,5 +19,13 @@
         "default": "mdi:calendar-export"
       }
     }
+  },
+  "services": {
+    "add_item": {
+      "service": "mdi:playlist-plus"
+    },
+    "update_item": {
+      "service": "mdi:playlist-edit"
+    }
   }
 }

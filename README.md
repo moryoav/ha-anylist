@@ -119,8 +119,10 @@ The integration enables calendar sharing only when it is currently disabled.
 
 ### Service Actions
 
-Recipe support is exposed through Home Assistant actions for automations, scripts, and Node-RED flows:
+Shopping list and recipe actions are available for automations, scripts, and Node-RED flows:
 
+- `anylist.add_item`
+- `anylist.update_item`
 - `anylist.refresh`
 - `anylist.get_recipes`
 - `anylist.search_recipes`
@@ -131,6 +133,56 @@ Recipe support is exposed through Home Assistant actions for automations, script
 - `anylist.delete_recipe`
 
 See [custom_components/anylist/services.yaml](custom_components/anylist/services.yaml) for field descriptions and examples.
+
+### Add or Update Item Quantity and Notes
+
+Use **AnyList: Add item** or **AnyList: Update item** in the visual automation
+editor or **Developer tools** -> **Actions**. Select the AnyList to-do entity as
+the target. Quantity and notes have separate inputs, so the item name stays
+clean for category matching. Quantity accepts text such as `2`, `2 kg`, or
+`1 1/2 cups`; notes can contain arbitrary text and multiple lines.
+
+Add an item with quantity and notes:
+
+```yaml
+action: anylist.add_item
+target:
+  entity_id: todo.anylist_groceries
+data:
+  name: Bread
+  quantity: "2"
+  notes: Bakery
+```
+
+After the action refreshes the list, Home Assistant displays
+`Qty: 2 | Bakery` under the item name. This description is generated from the
+AnyList fields and remains read only in the normal to-do editor. There is no
+special description syntax to enter or parse.
+
+Update only the notes, preserving the quantity, name, category, checked state,
+and other item data:
+
+```yaml
+action: anylist.update_item
+target:
+  entity_id: todo.anylist_groceries
+data:
+  item: Bread
+  notes: For Wednesday's dinner
+```
+
+`item` accepts an exact, case-sensitive name or the item UID returned by
+`todo.get_items`. If names are duplicated, use the UID to select the intended
+item. Supply at least one of `quantity` or `notes`; omitted fields stay unchanged.
+To clear a field, pass an empty string, for example `quantity: ""`. Clearing
+quantity does not clear notes, and clearing notes does not clear quantity.
+
+Adding an item reuses a checked item with the same name, ignoring case, and
+unchecks it. Supplied fields are applied to that item; omitted fields preserve
+its existing quantity or notes. If several checked items have the same name,
+the add action reports an ambiguity instead of choosing one. Use the update
+action with a UID, and `todo.update_item` to uncheck the selected item if needed.
+New items retain the normal category matching and **Insert New Items** behavior.
 
 ## Data Updates
 
@@ -308,7 +360,9 @@ response_variable: anylist_recipes
 - The integration supports AnyList cloud accounts, not local devices.
 - Recipe import from external websites is not implemented.
 - Items can be reordered by dragging them in the Home Assistant to-do list, but not from automations: Home Assistant has no action for moving a to-do item.
-- Item notes and quantities are shown in Home Assistant but cannot be edited there.
+- Item notes and quantities can be changed through `anylist.add_item` and
+  `anylist.update_item`. Their combined description remains read only in the
+  Home Assistant to-do editor.
 - Meal plan calendar support exposes the iCalendar URL; calendar entities are provided by Home Assistant's iCal integration.
 
 ## Troubleshooting
