@@ -249,7 +249,7 @@
     },
     "add_item": {
       "name": "Add item",
-      "description": "Add an item with separate quantity and notes. Reuse a matching checked item and preserve any omitted fields on that item.",
+      "description": "Add an item with separate quantity, notes, and category. Reuse a matching checked item and preserve any omitted fields on that item.",
       "fields": {
         "name": {
           "name": "Name",
@@ -262,6 +262,10 @@
         "notes": {
           "name": "Notes",
           "description": "Item notes. Omit to preserve a reused item's notes. Use an empty string to clear them."
+        },
+        "category": {
+          "name": "Category",
+          "description": "Category for a new item, by its name in AnyList or its match ID, ignoring case. A category AnyList already knows for the item name wins, and a reused checked item keeps its own. A blank or unknown category is ignored; an unknown one is logged."
         }
       }
     },

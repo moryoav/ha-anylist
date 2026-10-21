@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from copy import deepcopy
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
@@ -197,6 +198,96 @@ async def test_reuse_checked_item(
         False,
     )
     assert item.category == "bread"
+
+
+def _with_categories(client: ItemActionsClient) -> None:
+    """Give the list a renamed built-in category and a custom one."""
+    client.lists[0].categories = [
+        SimpleNamespace(
+            id="category-dairy", list_id="list-1", category_group_id="group-1",
+            name="Mejeri", match_id="dairy",
+        ),
+        SimpleNamespace(
+            id="category-tech", list_id="list-1", category_group_id="group-1",
+            name="Tech", match_id="Tech",
+        ),
+    ]
+
+
+def _added_with_details(client: ItemActionsClient) -> tuple[Any, ...]:
+    """Return the arguments of the one detailed add."""
+    [args] = [args for name, args in client.calls if name == "add_item_with_details"]
+    return args
+
+
+@pytest.mark.parametrize(
+    ("category", "category_id", "match_id"),
+    [
+        ("Mejeri", "category-dairy", "dairy"),
+        ("  mejeri ", "category-dairy", "dairy"),
+        ("DAIRY", "category-dairy", "dairy"),
+        ("tech", "category-tech", "Tech"),
+    ],
+)
+async def test_add_item_category(
+    hass: HomeAssistant,
+    action_client: ItemActionsClient,
+    category: str,
+    category_id: str,
+    match_id: str,
+) -> None:
+    """Place a new item in the category named by its name or match ID."""
+    _with_categories(action_client)
+    await _call(hass, "add_item", name="Sour cream", category=category)
+    list_id, name, _, _, sent_category, assignment = _added_with_details(action_client)
+    assert (list_id, name, sent_category) == ("list-1", "Sour cream", match_id)
+    assert (
+        assignment.category_id,
+        assignment.category_group_id,
+        assignment.list_id,
+    ) == (category_id, "group-1", "list-1")
+    assert assignment.id not in {"", category_id}
+
+
+async def test_add_item_known_category_wins(
+    hass: HomeAssistant, action_client: ItemActionsClient
+) -> None:
+    """Keep the category AnyList learned for the name, so app corrections stick."""
+    _with_categories(action_client)
+    learned = SimpleNamespace(
+        id="rule-1", item_name="sour cream", category_match_id="Tech",
+        category_name="Tech",
+    )
+    action_client.lists[0].category_assignments = [learned]
+    await _call(hass, "add_item", name="Sour cream", category="Mejeri")
+    _, _, _, _, sent_category, assignment = _added_with_details(action_client)
+    assert (sent_category, assignment.id) == ("Tech", "rule-1")
+
+
+async def test_add_item_category_leaves_reused_item_alone(
+    hass: HomeAssistant, action_client: ItemActionsClient
+) -> None:
+    """Uncheck a reused item without changing the category it already has."""
+    _with_categories(action_client)
+    await _call(hass, "add_item", name="milk", category="Mejeri")
+    item = action_client.lists[0].items[0]
+    assert (item.id, item.is_checked, item.category) == ("item-1", False, "bread")
+    assert not any(name.startswith("add_item") for name, _ in action_client.calls)
+
+
+@pytest.mark.parametrize(("category", "logged"), [("", False), (" ", False), ("Bakery", True)])
+async def test_add_item_without_a_known_category(
+    hass: HomeAssistant,
+    action_client: ItemActionsClient,
+    caplog: pytest.LogCaptureFixture,
+    category: str,
+    logged: bool,
+) -> None:
+    """Still add the item when the category is blank or not on the list."""
+    _with_categories(action_client)
+    await _call(hass, "add_item", name="Bread", category=category)
+    assert ("add_item", ("list-1", "Bread")) in action_client.calls
+    assert ("has no category 'Bakery'" in caplog.text) is logged
 
 
 async def test_updates_read_fresh_cloud_values(

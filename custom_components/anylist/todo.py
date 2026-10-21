@@ -19,11 +19,16 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-from .category import resolve_category_for_item
+from .category import (
+    CategoryResolution,
+    find_list_category,
+    resolve_category_for_item,
+)
 from .client import (
     SORT_ORDER_ALPHABETICAL,
     SORT_ORDER_MANUAL,
     async_call_with_timeout,
+    category_assignment_for,
     inserts_new_items_at_top,
 )
 from .const import ANYLIST_REQUEST_TIMEOUT, DOMAIN
@@ -298,12 +303,19 @@ class AnyListTodoEntity(AnyListListEntity, TodoListEntity):
         await self._async_create_item(item)
 
     async def async_add_item(
-        self, name: str, quantity: str | None = None, notes: str | None = None
+        self,
+        name: str,
+        quantity: str | None = None,
+        notes: str | None = None,
+        category: str | None = None,
     ) -> None:
         """Add an item with separate quantity/notes, reusing a checked match.
 
         Omitted fields retain their values when a checked item is reused;
         supplied empty strings clear them. The description stays read only.
+        The category only applies to a new item whose name AnyList has no
+        category for. A blank category is ignored, and one the list doesn't
+        have is logged and ignored, so the item still reaches the list.
         """
         if not name.strip():
             raise ServiceValidationError(
@@ -320,8 +332,27 @@ class AnyListTodoEntity(AnyListListEntity, TodoListEntity):
                     translation_domain=DOMAIN,
                     translation_key="ambiguous_todo_item",
                 )
+            list_category = find_list_category(
+                category,
+                self._list_id,
+                self.coordinator.data.get("lists", []),
+            )
+            requested_category = None
+            if list_category is not None:
+                requested_category = CategoryResolution(
+                    list_category.match_id, category_assignment_for(list_category)
+                )
+            elif category and category.strip():
+                _LOGGER.warning(
+                    "AnyList list %s has no category %r; adding %r without it",
+                    self.shopping_list.name,
+                    category,
+                    name,
+                )
             await self._async_create_item(
-                TodoItem(summary=name, description=notes), quantity
+                TodoItem(summary=name, description=notes),
+                quantity,
+                requested_category,
             )
 
     async def async_update_item(
@@ -363,9 +394,16 @@ class AnyListTodoEntity(AnyListListEntity, TodoListEntity):
             await self._async_refresh_list()
 
     async def _async_create_item(
-        self, item: TodoItem, quantity: str | None = None
+        self,
+        item: TodoItem,
+        quantity: str | None = None,
+        requested_category: CategoryResolution | None = None,
     ) -> None:
-        """Share category, insertion-order, and checked-item reuse behavior."""
+        """Share category, insertion-order, and checked-item reuse behavior.
+
+        A new item gets the category AnyList knows for its name, else the
+        requested category. A reused checked item keeps its own.
+        """
         # Check for existing checked-off item with same name (case insensitive)
         existing_item = self._find_checked_item_by_name(item.summary) if item.summary else None
 
@@ -402,6 +440,8 @@ class AnyListTodoEntity(AnyListListEntity, TodoListEntity):
                 self.coordinator.data.get("lists", []),
                 self.coordinator.data.get("favourites", []),
             )
+            if category_resolution is None:
+                category_resolution = requested_category
 
             # Honour the list's "Insert New Items" setting like the AnyList app.
             at_top = inserts_new_items_at_top(

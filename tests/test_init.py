@@ -261,6 +261,58 @@ def test_category_resolver_returns_none_for_conflicting_categories():
     )
 
 
+def test_find_list_category_by_name_then_match_id():
+    """Test a requested category matches a name first, then a match ID."""
+    category = _load_category_module()
+    dairy = SimpleNamespace(name="Mejeri", match_id="dairy")
+    named_dairy = SimpleNamespace(name="Dairy", match_id="custom-dairy")
+    shopping_lists = [
+        SimpleNamespace(id="other", categories=[SimpleNamespace(name="Bakery", match_id="bakery")]),
+        SimpleNamespace(id="list1", categories=[dairy, named_dairy]),
+    ]
+
+    assert category.find_list_category(" mejeri ", "list1", shopping_lists) is dairy
+    assert category.find_list_category("DAIRY", "list1", shopping_lists) is named_dairy
+    assert category.find_list_category("custom-dairy", "list1", shopping_lists) is named_dairy
+
+
+def test_find_list_category_returns_none_without_match():
+    """Test unknown, blank, and other lists' categories are not found."""
+    category = _load_category_module()
+    shopping_lists = [
+        SimpleNamespace(id="other", categories=[SimpleNamespace(name="Bakery", match_id="bakery")]),
+        SimpleNamespace(id="list1", categories=[SimpleNamespace(name="Dairy", match_id="dairy")]),
+    ]
+
+    for requested in ("Bakery", "", "  ", None):
+        assert category.find_list_category(requested, "list1", shopping_lists) is None
+    assert category.find_list_category("Dairy", "missing", shopping_lists) is None
+
+
+def test_category_assignment_for_names_the_category():
+    """Test a new item's assignment points at the exact list category."""
+    client_module = _load_client_module()
+    list_category = client_module.ListCategory(
+        id="category1",
+        list_id="list1",
+        category_group_id="group1",
+        name="Mejeri",
+        match_id="dairy",
+    )
+
+    first = client_module.category_assignment_for(list_category)
+    second = client_module.category_assignment_for(list_category)
+
+    assert (
+        first.category_id,
+        first.category_group_id,
+        first.list_id,
+        first.category_name,
+        first.category_match_id,
+    ) == ("category1", "group1", "list1", "Mejeri", "dairy")
+    assert first.id and first.id != second.id
+
+
 def test_local_client_add_item_writes_category_match_id():
     """Test category adds include category_match_id and assignment fields."""
     client_module = _load_client_module()

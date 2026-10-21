@@ -43,6 +43,7 @@ from .const import (
     ANYLIST_PHOTO_TIMEOUT,
     ANYLIST_REFRESH_TIMEOUT,
     ANYLIST_REQUEST_TIMEOUT,
+    ATTR_CATEGORY,
     ATTR_CONFIG_ENTRY_ID,
     ATTR_IMAGE_URL,
     ATTR_INGREDIENTS,
@@ -952,6 +953,7 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
             vol.Required(ATTR_NAME): cv.string,
             vol.Optional(ATTR_QUANTITY): cv.string,
             vol.Optional(ATTR_NOTES): cv.string,
+            vol.Optional(ATTR_CATEGORY): cv.string,
         },
         func="async_add_item",
     )

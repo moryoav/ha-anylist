@@ -95,6 +95,8 @@ New items follow the list's **Insert New Items** setting, the same as in the Any
 When Home Assistant adds an item that AnyList already knows how to categorize
 for that list, the integration sends the same category assignment metadata used
 by the AnyList app, so known grocery items land in their usual categories.
+For items AnyList doesn't know yet, `anylist.add_item` can name a category
+(see below).
 
 Todo entities expose these state attributes for content-change detection:
 
@@ -183,6 +185,31 @@ its existing quantity or notes. If several checked items have the same name,
 the add action reports an ambiguity instead of choosing one. Use the update
 action with a UID, and `todo.update_item` to uncheck the selected item if needed.
 New items retain the normal category matching and **Insert New Items** behavior.
+
+### Add an Item to a Category
+
+`anylist.add_item` also takes a `category`, for items AnyList can't categorize
+by itself, such as product names from a barcode scanner:
+
+```yaml
+action: anylist.add_item
+target:
+  entity_id: todo.anylist_groceries
+data:
+  name: Arla Sour Cream 12%
+  category: Dairy
+```
+
+`category` is the category's name on the list, or its AnyList match ID such as
+`dairy`, which stays the same when a built-in category is renamed. Case and
+extra spaces are ignored. A blank category is ignored. If the list has no such
+category, for example after it was renamed in the app, the item is still added,
+without a category, and Home Assistant logs a warning.
+
+The category is only a fallback for new items. If AnyList already knows a
+category for the item name, because you categorized it in the app, that category
+wins, so corrections made in the app stick. A reused checked item keeps its own
+category.
 
 ## Data Updates
 

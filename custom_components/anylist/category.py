@@ -54,6 +54,35 @@ def resolve_category_for_item(
     return _resolve_from_favourites(normalized_name, list_id, favourites)[1]
 
 
+def find_list_category(
+    category: str | None,
+    list_id: str,
+    shopping_lists: Iterable[Any],
+) -> Any | None:
+    """Find a category named by the caller among the target list's categories.
+
+    A category name matches first, then an AnyList match ID such as ``dairy``,
+    which stays the same when a built-in category is renamed. Case and extra
+    whitespace are ignored, and the first match in the list's order wins.
+    """
+    requested = normalize_item_name(category)
+    if not requested:
+        return None
+
+    for shopping_list in shopping_lists:
+        if getattr(shopping_list, "id", None) != list_id:
+            continue
+
+        categories = list(getattr(shopping_list, "categories", []))
+        for attr in ("name", "match_id"):
+            for list_category in categories:
+                if normalize_item_name(getattr(list_category, attr, None)) == requested:
+                    return list_category
+        return None
+
+    return None
+
+
 def _resolve_from_assignments(
     normalized_name: str,
     list_id: str,

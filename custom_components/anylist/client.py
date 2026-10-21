@@ -129,6 +129,21 @@ class ShoppingList:
     new_item_position: str = NEW_ITEM_POSITION_BOTTOM
 
 
+def category_assignment_for(category: ListCategory) -> ItemCategoryAssignment:
+    """Return a new assignment of an item to the category, for adding the item.
+
+    The assignment names the exact category, so custom categories resolve too.
+    """
+    return ItemCategoryAssignment(
+        id=_generate_id(),
+        category_group_id=category.category_group_id,
+        category_id=category.id,
+        list_id=category.list_id,
+        category_name=category.name,
+        category_match_id=category.match_id,
+    )
+
+
 def inserts_new_items_at_top(shopping_list: Any) -> bool:
     """Return whether the AnyList app would add new items at the top.
 
