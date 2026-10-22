@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.10.0 - 2026-10-22
+
+- Add `anylist.get_categories` with category names, IDs, category set details,
+  and optional item counts, including empty categories.
+- Expose the category catalog and counts in the `available_categories`
+  attribute of each AnyList to-do entity.
+- Add category hints to `anylist.add_item` and explicit category changes to
+  `anylist.update_item`. Resolve selections within their category set and
+  preserve assignments in other sets and existing item metadata.
+- Read custom category aliases and repeated item assignments using AnyList's
+  native format. Thanks to [@JoaSel](https://github.com/JoaSel) for suggesting
+  category support in [#11](https://github.com/moryoav/ha-anylist/pull/11).
+
 ## 0.9.0 - 2026-10-20
 
 - Add `anylist.add_item` and `anylist.update_item` actions with separate quantity

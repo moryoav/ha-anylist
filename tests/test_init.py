@@ -315,7 +315,7 @@ def test_local_client_parses_category_assignments():
         + client_module._field_string(3, "group1")
         + client_module._field_string(4, "list1")
         + client_module._field_string(5, "Dairy")
-        + client_module._field_string(6, "dairy")
+        + client_module._field_string(7, "dairy")
     )
     category_group = (
         client_module._field_string(1, "group1")

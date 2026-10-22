@@ -20,6 +20,12 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .category import resolve_category_for_item
+from .category_catalog import (
+    CategorySelectionError,
+    known_category,
+    select_category,
+    serialize_categories,
+)
 from .client import (
     SORT_ORDER_ALPHABETICAL,
     SORT_ORDER_MANUAL,
@@ -225,8 +231,13 @@ class AnyListTodoEntity(AnyListListEntity, TodoListEntity):
             sort_keys=True,
             separators=(",", ":"),
         )
+        current_list = find_shopping_list(self.coordinator, self._list_id)
 
         return {
+            "available_categories": (
+                serialize_categories(current_list, include_counts=True)["categories"]
+                if current_list is not None else []
+            ),
             "items_signature": hashlib.sha256(
                 items_signature_raw.encode("utf-8")
             ).hexdigest(),
@@ -298,12 +309,20 @@ class AnyListTodoEntity(AnyListListEntity, TodoListEntity):
         await self._async_create_item(item)
 
     async def async_add_item(
-        self, name: str, quantity: str | None = None, notes: str | None = None
+        self,
+        name: str,
+        quantity: str | None = None,
+        notes: str | None = None,
+        category: str | None = None,
+        category_id: str | None = None,
+        category_set_id: str | None = None,
     ) -> None:
         """Add an item with separate quantity/notes, reusing a checked match.
 
         Omitted fields retain their values when a checked item is reused;
         supplied empty strings clear them. The description stays read only.
+        Category hints apply only when a new item has no known category in the
+        selected set. Unusable hints warn and still allow the item to be added.
         """
         if not name.strip():
             raise ServiceValidationError(
@@ -321,18 +340,47 @@ class AnyListTodoEntity(AnyListListEntity, TodoListEntity):
                     translation_key="ambiguous_todo_item",
                 )
             await self._async_create_item(
-                TodoItem(summary=name, description=notes), quantity
+                TodoItem(summary=name, description=notes),
+                quantity,
+                category=category,
+                category_id=category_id,
+                category_set_id=category_set_id,
             )
 
+    async def async_get_categories(
+        self, category_set_id: str | None = None, include_counts: bool = False
+    ) -> dict[str, Any]:
+        """Return a fresh category catalog, optionally counting items per set."""
+        async with self._item_action_lock:
+            await self._async_refresh_list()
+            try:
+                return serialize_categories(
+                    self.shopping_list,
+                    category_set_id=category_set_id,
+                    include_counts=include_counts,
+                )
+            except CategorySelectionError as err:
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN, translation_key=err.reason
+                ) from err
+
     async def async_update_item(
-        self, item: str, quantity: str | None = None, notes: str | None = None
+        self,
+        item: str,
+        quantity: str | None = None,
+        notes: str | None = None,
+        category: str | None = None,
+        category_id: str | None = None,
+        category_set_id: str | None = None,
     ) -> None:
         """Update one item by UID or exact name without changing other fields.
 
         At least one field must be supplied. Omitted fields are preserved and
-        empty strings clear fields. Duplicate names require a UID.
+        empty strings clear quantity or notes. Duplicate names require a UID.
+        A supplied category is an explicit move within its set. Validate it
+        before changing any field, and preserve assignments in all other sets.
         """
-        if quantity is None and notes is None:
+        if all(value is None for value in (quantity, notes, category, category_id)):
             raise ServiceValidationError(
                 translation_domain=DOMAIN, translation_key="item_fields_required"
             )
@@ -351,6 +399,32 @@ class AnyListTodoEntity(AnyListListEntity, TodoListEntity):
                     translation_domain=DOMAIN, translation_key="ambiguous_todo_item"
                 )
             current = matches[0]
+            if any(
+                value is not None for value in (category, category_id, category_set_id)
+            ):
+                try:
+                    selected = select_category(
+                        self.shopping_list,
+                        name=category,
+                        category_id=category_id,
+                        category_set_id=category_set_id,
+                    )
+                except CategorySelectionError as err:
+                    raise ServiceValidationError(
+                        translation_domain=DOMAIN, translation_key=err.reason
+                    ) from err
+                await self._async_call_client(
+                    "update todo category and supplied fields",
+                    self._client.update_item_category,
+                    self._list_id,
+                    current.id,
+                    selected,
+                    quantity,
+                    notes,
+                    current.details,
+                )
+                await self._async_refresh_list()
+                return
             await self._async_call_client(
                 "update todo quantity and notes",
                 self._client.update_item_details,
@@ -363,7 +437,13 @@ class AnyListTodoEntity(AnyListListEntity, TodoListEntity):
             await self._async_refresh_list()
 
     async def _async_create_item(
-        self, item: TodoItem, quantity: str | None = None
+        self,
+        item: TodoItem,
+        quantity: str | None = None,
+        *,
+        category: str | None = None,
+        category_id: str | None = None,
+        category_set_id: str | None = None,
     ) -> None:
         """Share category, insertion-order, and checked-item reuse behavior."""
         # Check for existing checked-off item with same name (case insensitive)
@@ -396,12 +476,58 @@ class AnyListTodoEntity(AnyListListEntity, TodoListEntity):
                 existing_item.uid,
             )
         else:
-            category_resolution = resolve_category_for_item(
+            selection_error = None
+            has_hint = (
+                bool(category and category.strip())
+                or category_id is not None
+                or category_set_id is not None
+            )
+            if has_hint:
+                selected = None
+                try:
+                    selected = select_category(
+                        self.shopping_list,
+                        name=category,
+                        category_id=category_id,
+                        category_set_id=category_set_id,
+                    )
+                except CategorySelectionError as err:
+                    selection_error = err
+                scope = selected.category_group_id if selected else category_set_id
+                try:
+                    learned = known_category(
+                        self.shopping_list,
+                        item.summary or "",
+                        self.coordinator.data.get("favourites", []),
+                        scope,
+                    )
+                except CategorySelectionError:
+                    learned = None
+                selected = learned or selected
+                if selected is not None:
+                    await self._async_call_client(
+                        "create todo item in category",
+                        self._client.add_item_to_category,
+                        self._list_id,
+                        item.summary,
+                        selected,
+                        quantity,
+                        item.description,
+                        inserts_new_items_at_top(self.shopping_list),
+                    )
+                    await self._async_refresh_after_mutation()
+                    return
+            category_resolution = None if has_hint else resolve_category_for_item(
                 item.summary,
                 self._list_id,
                 self.coordinator.data.get("lists", []),
                 self.coordinator.data.get("favourites", []),
             )
+            if has_hint and category_resolution is None and selection_error is not None:
+                _LOGGER.warning(
+                    "Ignoring the AnyList category hint because %s; adding the item normally",
+                    selection_error,
+                )
 
             # Honour the list's "Insert New Items" setting like the AnyList app.
             at_top = inserts_new_items_at_top(

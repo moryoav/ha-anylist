@@ -101,6 +101,11 @@ Todo entities expose these state attributes for content-change detection:
 - `items_signature`: a SHA256 hash of current item names and completion states.
 - `items_signature_raw`: the normalized source string used to build the hash.
 
+The `available_categories` attribute contains every configured category,
+including empty categories, with its ID, name, match ID, category set ID and
+name, and item counts. It updates with the list's normal refresh. Use
+`anylist.get_categories` when an automation needs a fresh catalog or set details.
+
 ### List Setting Entities
 
 Each shopping list device has two select entities that mirror settings from the AnyList app:
@@ -123,6 +128,7 @@ Shopping list and recipe actions are available for automations, scripts, and Nod
 
 - `anylist.add_item`
 - `anylist.update_item`
+- `anylist.get_categories`
 - `anylist.refresh`
 - `anylist.get_recipes`
 - `anylist.search_recipes`
@@ -173,7 +179,8 @@ data:
 
 `item` accepts an exact, case-sensitive name or the item UID returned by
 `todo.get_items`. If names are duplicated, use the UID to select the intended
-item. Supply at least one of `quantity` or `notes`; omitted fields stay unchanged.
+item. Supply at least one of `quantity`, `notes`, `category`, or `category_id`;
+omitted fields stay unchanged.
 To clear a field, pass an empty string, for example `quantity: ""`. Clearing
 quantity does not clear notes, and clearing notes does not clear quantity.
 
@@ -183,6 +190,83 @@ its existing quantity or notes. If several checked items have the same name,
 the add action reports an ambiguity instead of choosing one. Use the update
 action with a UID, and `todo.update_item` to uncheck the selected item if needed.
 New items retain the normal category matching and **Insert New Items** behavior.
+
+### Discover and Choose Categories
+
+`anylist.get_categories` returns all configured categories, including those
+without items. The response is keyed by the targeted to-do entity, so one action
+can query several lists:
+
+```yaml
+action: anylist.get_categories
+target:
+  entity_id: todo.anylist_groceries
+data:
+  include_counts: true
+response_variable: catalog
+```
+
+For `catalog['todo.anylist_groceries']`, the response includes:
+
+- `list_id`: the AnyList list ID.
+- `category_names`: category names in their configured order.
+- `categories`: objects with `id`, `name`, `match_id`, `category_set_id`, and
+  `category_set_name`.
+- `category_sets`: objects with `id`, `name`, and `default_category_id`, including
+  sets with no categories.
+
+With `include_counts: true`, each category also includes `needs_action_count`,
+`completed_count`, and `total_count`. Counts include all list items and are
+calculated separately for each category set, using its default category for
+items without a valid assignment. Adding the counts across different sets can
+count an item more than once. The entity's `available_categories` attribute
+always includes these counts.
+
+An optional `category_set_id` filters the action to one exact set. Names and
+match IDs can repeat across sets, so the unfiltered `category_names` array can
+contain duplicates. IDs are returned for selecting the intended category
+without relying on its display name.
+
+Use `category` on `anylist.add_item` as a hint for a new item:
+
+```yaml
+action: anylist.add_item
+target:
+  entity_id: todo.anylist_groceries
+data:
+  name: New scanner product
+  quantity: "2"
+  category: Dairy
+```
+
+Category names and match IDs ignore case and extra whitespace. A matching name
+takes priority over a match ID. To disambiguate categories, supply
+`category_set_id`, or use `category_id` instead of `category`. These IDs are
+exact values from `get_categories`.
+
+On add, a known categorization from the selected set's learned rules, existing
+items, or linked favourites takes priority over the hint. Reusing a checked
+item preserves all its category assignments. A blank category hint is ignored;
+an unknown or ambiguous hint logs a warning and still adds the item normally.
+
+Use `anylist.update_item` for an explicit category change:
+
+```yaml
+action: anylist.update_item
+target:
+  entity_id: todo.anylist_groceries
+data:
+  item: item_uid_from_todo_get_items
+  category_id: category_id_from_get_categories
+  category_set_id: category_set_id_from_get_categories
+```
+
+An explicit update changes only that category set's assignment and any supplied
+quantity or notes. It preserves assignments in other sets, the checked state,
+name, photos, barcode, and other item data. Unknown, blank, or ambiguous category
+selections reject the action before any supplied fields are changed. To move an
+item to a set's default category, select that category explicitly. Omitting both
+category selectors preserves all existing assignments.
 
 ## Data Updates
 

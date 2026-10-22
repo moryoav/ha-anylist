@@ -15,6 +15,7 @@ import socket
 import struct
 import time
 from typing import Any, Callable, TypeVar
+import unicodedata
 from urllib import error as urlerror
 from urllib import request
 from urllib.parse import urlsplit
@@ -82,6 +83,18 @@ class ListCategory:
     category_group_id: str
     name: str
     match_id: str
+    icon: str | None = None
+    sort_index: int = 0
+
+
+@dataclass(slots=True)
+class CategorySet:
+    """A list's category set, including its default category."""
+
+    id: str
+    list_id: str
+    name: str = ""
+    default_category_id: str | None = None
 
 
 @dataclass(slots=True)
@@ -111,6 +124,7 @@ class ListItem:
     category_assignment: ItemCategoryAssignment | None = None
     user_id: str | None = None
     product_upc: str | None = None
+    category_assignments: list[ItemCategoryAssignment] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -127,6 +141,7 @@ class ShoppingList:
     # comes from the per-user list settings or the default.
     sort_order_is_set: bool = False
     new_item_position: str = NEW_ITEM_POSITION_BOTTOM
+    category_sets: list[CategorySet] = field(default_factory=list)
 
 
 def inserts_new_items_at_top(shopping_list: Any) -> bool:
@@ -382,10 +397,12 @@ def _parse_list_item(data: bytes, fallback_list_id: str | None = None) -> ListIt
     if not item_id or not name or not list_id:
         return None
 
-    category_assignment = None
-    raw_category_assignment = _first_value(fields, 20)
-    if isinstance(raw_category_assignment, bytes):
-        category_assignment = _parse_item_category_assignment(raw_category_assignment)
+    category_assignments = [
+        assignment
+        for raw in _all_values(fields, 20)
+        if isinstance(raw, bytes)
+        and (assignment := _parse_item_category_assignment(raw)) is not None
+    ]
 
     return ListItem(
         id=item_id,
@@ -395,9 +412,10 @@ def _parse_list_item(data: bytes, fallback_list_id: str | None = None) -> ListIt
         is_checked=_first_bool(fields, 6),
         quantity=_parse_item_quantity(fields),
         category=_first_string(fields, 13) or _first_string(fields, 11),
-        category_assignment=category_assignment,
+        category_assignment=category_assignments[0] if category_assignments else None,
         user_id=_first_string(fields, 12),
         product_upc=_first_string(fields, 30),
+        category_assignments=category_assignments,
     )
 
 
@@ -427,7 +445,9 @@ def _parse_list_category(
     category_group_id = _first_string(fields, 3) or fallback_category_group_id
     list_id = _first_string(fields, 4) or fallback_list_id
     name = _first_string(fields, 5)
-    match_id = _first_string(fields, 6) or _first_string(fields, 7)
+    # PBListCategory field 6 is an icon, not a matching identifier. The web
+    # client uses systemCategory (7), or a normalized custom category name.
+    match_id = _first_string(fields, 7)
 
     if not category_id or not category_group_id or not list_id or not name:
         return None
@@ -437,8 +457,23 @@ def _parse_list_category(
         list_id=list_id,
         category_group_id=category_group_id,
         name=name,
-        match_id=match_id or name,
+        match_id=match_id or _custom_category_match_id(name),
+        icon=_first_string(fields, 6),
+        sort_index=_first_int(fields, 9) or 0,
     )
+
+
+def _custom_category_match_id(name: str) -> str:
+    """Normalize a custom category name using the web client's matching rules."""
+    name = name.lower().strip().replace("&", " and ", 1)
+    characters = []
+    for character in name:
+        kind = unicodedata.category(character)
+        if kind in {"Ll", "Lu", "Lt", "Lo", "Nd"} or character == "-":
+            characters.append(character)
+        elif character in "\t\n\f\r" or kind.startswith("Z"):
+            characters.append(" ")
+    return re.sub(r"[ -]+", "-", "".join(characters))
 
 
 def _parse_item_category_assignment(
@@ -449,15 +484,16 @@ def _parse_item_category_assignment(
     """Parse a PBListItemCategoryAssignment."""
     fields = _parse_fields(data)
     assignment_id = _first_string(fields, 1)
-    category_group_id = _first_string(fields, 4) or _first_string(fields, 2)
-    category_id = _first_string(fields, 6) or _first_string(fields, 3)
+    is_rule = 6 in fields
+    category_group_id = _first_string(fields, 4 if is_rule else 2)
+    category_id = _first_string(fields, 6 if is_rule else 3)
 
-    if not assignment_id or not category_group_id or not category_id:
+    if not assignment_id or not category_group_id or category_id is None:
         return None
 
     return ItemCategoryAssignment(
         id=assignment_id,
-        list_id=_first_string(fields, 3) if _first_string(fields, 6) else fallback_list_id,
+        list_id=_first_string(fields, 3) if is_rule else fallback_list_id,
         category_group_id=category_group_id,
         item_name=_first_string(fields, 5),
         category_id=category_id,
@@ -466,12 +502,13 @@ def _parse_item_category_assignment(
 
 def _parse_list_category_data(
     data: bytes,
-) -> tuple[str | None, list[ListCategory], list[ItemCategoryAssignment]]:
+) -> tuple[str | None, list[ListCategory], list[ItemCategoryAssignment], list[CategorySet]]:
     """Parse category data attached to shopping lists."""
     fields = _parse_fields(data)
     list_id = _first_string(fields, 1)
     categories: list[ListCategory] = []
     assignments: list[ItemCategoryAssignment] = []
+    category_sets: list[CategorySet] = []
 
     for raw_category_group_container in _all_values(fields, 7):
         if not isinstance(raw_category_group_container, bytes):
@@ -484,6 +521,17 @@ def _parse_list_category_data(
             category_group_fields = _parse_fields(raw_category_group)
             category_group_id = _first_string(category_group_fields, 1)
             group_list_id = _first_string(category_group_fields, 3) or list_id
+            if not category_group_id or not group_list_id or group_list_id != list_id:
+                continue
+            category_sets.append(
+                CategorySet(
+                    id=category_group_id,
+                    list_id=group_list_id,
+                    name=_first_string(category_group_fields, 4) or "",
+                    default_category_id=_first_string(category_group_fields, 8),
+                )
+            )
+            group_categories = []
             for raw_category in _all_values(category_group_fields, 5):
                 if not isinstance(raw_category, bytes):
                     continue
@@ -492,10 +540,17 @@ def _parse_list_category_data(
                     fallback_list_id=group_list_id,
                     fallback_category_group_id=category_group_id,
                 )
-                if category is not None:
-                    categories.append(category)
+                if (
+                    category is not None
+                    and category.list_id == list_id
+                    and category.category_group_id == category_group_id
+                ):
+                    group_categories.append(category)
+            categories.extend(sorted(group_categories, key=lambda value: value.sort_index))
 
-    categories_by_id = {category.id: category for category in categories}
+    categories_by_id = {
+        (category.category_group_id, category.id): category for category in categories
+    }
     for raw_assignment in _all_values(fields, 13):
         if not isinstance(raw_assignment, bytes):
             continue
@@ -506,13 +561,15 @@ def _parse_list_category_data(
         if assignment is None:
             continue
 
-        category = categories_by_id.get(assignment.category_id)
+        category = categories_by_id.get(
+            (assignment.category_group_id, assignment.category_id)
+        )
         if category is not None:
             assignment.category_name = category.name
             assignment.category_match_id = category.match_id
         assignments.append(assignment)
 
-    return list_id, categories, assignments
+    return list_id, categories, assignments, category_sets
 
 
 def _parse_shopping_list(data: bytes) -> ShoppingList | None:
@@ -598,13 +655,16 @@ def _parse_shopping_lists_response(data: bytes) -> list[ShoppingList]:
         if not isinstance(raw_category_data, bytes):
             continue
 
-        list_id, categories, assignments = _parse_list_category_data(raw_category_data)
+        list_id, categories, assignments, category_sets = _parse_list_category_data(
+            raw_category_data
+        )
         if list_id is None or list_id not in lists_by_id:
             continue
 
         shopping_list = lists_by_id[list_id]
         shopping_list.categories = categories
         shopping_list.category_assignments = assignments
+        shopping_list.category_sets = category_sets
 
     return shopping_lists
 
@@ -775,6 +835,37 @@ def _pb_list_item_category_assignment(
     )
 
 
+def _assignment_for_category(category: ListCategory) -> ItemCategoryAssignment:
+    """Use the web client's deterministic assignment identity for this set."""
+    namespace = uuid.UUID("08e5c5bdcd694454a1ffd611b6d9abc0")
+    return ItemCategoryAssignment(
+        id=uuid.uuid5(namespace, category.category_group_id).hex,
+        category_group_id=category.category_group_id,
+        category_id=category.id,
+        list_id=category.list_id,
+        category_name=category.name,
+        category_match_id=category.match_id,
+    )
+
+
+def _preserved_fields(
+    fields: dict[int, list[tuple[int, Any]]], excluded: set[int]
+) -> bytes:
+    """Re-encode unchanged protobuf fields, retaining unknown future metadata."""
+    parts = []
+    for number, values in fields.items():
+        if number in excluded:
+            continue
+        for wire_type, value in values:
+            if wire_type == 2:
+                parts.append(_field_bytes(number, value))
+            elif wire_type == 0:
+                parts.append(_field_key(number, wire_type) + _encode_varint(value))
+            else:
+                parts.append(_field_key(number, wire_type) + value)
+    return b"".join(parts)
+
+
 def _pb_item_quantity(quantity: str) -> bytes:
     """Keep quantity text verbatim and expose common amounts to AnyList totals.
 
@@ -803,6 +894,7 @@ def _pb_list_item(
     category_match_id: str | None = None,
     category_assignment: ItemCategoryAssignment | None = None,
     product_upc: str | None = None,
+    category_assignments: list[ItemCategoryAssignment] | None = None,
 ) -> bytes:
     """Build PBListItem."""
     return b"".join(
@@ -819,7 +911,14 @@ def _pb_list_item(
             _field_string(12, user_id),
             _field_string(13, category_match_id),
             _field_int32(17, 0),
-            _field_message(20, _pb_list_item_category_assignment(category_assignment)),
+            b"".join(
+                _field_message(20, _pb_list_item_category_assignment(assignment))
+                for assignment in (
+                    category_assignments
+                    if category_assignments is not None
+                    else ([category_assignment] if category_assignment else [])
+                )
+            ),
             _field_string(30, product_upc),
         )
     )
@@ -1213,6 +1312,29 @@ class AnyListClient:
             category=category_match_id,
             category_assignment=category_assignment,
             user_id=self._user_id,
+            category_assignments=[category_assignment] if category_assignment else [],
+        )
+
+    def add_item_to_category(
+        self,
+        list_id: str,
+        name: str,
+        category: ListCategory,
+        quantity: str | None = None,
+        details: str | None = None,
+        at_top: bool = False,
+    ) -> ListItem:
+        """Create an item with an exact category and the native per-set identity."""
+        if category.list_id != list_id:
+            raise AnyListError("The selected category belongs to another list")
+        return self.add_item_with_details(
+            list_id,
+            name,
+            quantity,
+            details,
+            category.match_id or "other",
+            _assignment_for_category(category),
+            at_top,
         )
 
     def update_item_details(
@@ -1228,6 +1350,21 @@ class AnyListClient:
         These are the web app's field-specific operations. Avoid rebuilding a
         whole item, which could reset its checked state or discard metadata.
         """
+        operations = self._item_detail_operations(
+            list_id, item_id, quantity, details, original_details
+        )
+        if operations:
+            self.post("data/shopping-lists/update", _pb_list_operation_list(operations))
+
+    def _item_detail_operations(
+        self,
+        list_id: str,
+        item_id: str,
+        quantity: str | None,
+        details: str | None,
+        original_details: str | None,
+    ) -> list[bytes]:
+        """Build field-specific quantity and notes updates for one request."""
         operations = []
         if quantity is not None:
             item = b"".join((
@@ -1252,8 +1389,81 @@ class AnyListClient:
                 updated_value=details,
                 original_value=original_details,
             ))
-        if operations:
-            self.post("data/shopping-lists/update", _pb_list_operation_list(operations))
+        return operations
+
+    def update_item_category(
+        self,
+        list_id: str,
+        item_id: str,
+        category: ListCategory,
+        quantity: str | None = None,
+        details: str | None = None,
+        original_details: str | None = None,
+    ) -> None:
+        """Change one set's assignment, preserving every other item field.
+
+        The web client sends a complete, freshly read ListItem to its dedicated
+        update-list-item-category-assignment handler. Retain all unknown fields
+        and all other sets' assignments instead of rebuilding a partial item.
+        """
+        if category.list_id != list_id:
+            raise AnyListError("The selected category belongs to another list")
+        item = _parse_fields(self._find_raw_list_item(list_id, item_id))
+        assignment = _pb_list_item_category_assignment(_assignment_for_category(category))
+        assert assignment is not None
+        assignments = []
+        replaced = False
+        for raw in _all_values(item, 20):
+            if not isinstance(raw, bytes):
+                continue
+            fields = _parse_fields(raw)
+            if _first_string(fields, 2) == category.category_group_id:
+                if not replaced:
+                    assignments.append(assignment + _preserved_fields(fields, {1, 2, 3}))
+                    replaced = True
+            else:
+                assignments.append(raw)
+        if not replaced:
+            assignments.append(assignment)
+        payload = _preserved_fields(item, {20}) + b"".join(
+            _field_message(20, value) for value in assignments
+        )
+        operations = [
+            _pb_list_operation(
+                handler_id="update-list-item-category-assignment",
+                user_id=self._user_id,
+                list_id=list_id,
+                list_item_id=item_id,
+                list_item=payload,
+            )
+        ]
+        operations.extend(
+            self._item_detail_operations(
+                list_id, item_id, quantity, details, original_details
+            )
+        )
+        self.post("data/shopping-lists/update", _pb_list_operation_list(operations))
+
+    def _find_raw_list_item(self, list_id: str, item_id: str) -> bytes:
+        """Read the authoritative item protobuf before preserving its metadata."""
+        response = _first_value(_parse_fields(self.get_user_data()), 1)
+        if isinstance(response, bytes):
+            fields = _parse_fields(response)
+            for raw_list in _all_values(fields, 1) + _all_values(fields, 2):
+                if not isinstance(raw_list, bytes):
+                    continue
+                shopping_list = _parse_fields(raw_list)
+                if _first_string(shopping_list, 1) != list_id:
+                    continue
+                for raw_item in _all_values(shopping_list, 4):
+                    if (
+                        isinstance(raw_item, bytes)
+                        and _first_string(_parse_fields(raw_item), 1) == item_id
+                    ):
+                        return raw_item
+        raise AnyListNotFoundError(
+            "The AnyList item was not found before changing its category"
+        )
 
     def update_item(
         self,

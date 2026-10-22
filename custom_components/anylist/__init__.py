@@ -43,10 +43,14 @@ from .const import (
     ANYLIST_PHOTO_TIMEOUT,
     ANYLIST_REFRESH_TIMEOUT,
     ANYLIST_REQUEST_TIMEOUT,
+    ATTR_CATEGORY,
+    ATTR_CATEGORY_ID,
+    ATTR_CATEGORY_SET_ID,
     ATTR_CONFIG_ENTRY_ID,
     ATTR_IMAGE_URL,
     ATTR_INGREDIENTS,
     ATTR_INCLUDE_INGREDIENTS,
+    ATTR_INCLUDE_COUNTS,
     ATTR_INCLUDE_STEPS,
     ATTR_ITEM,
     ATTR_LIMIT,
@@ -72,6 +76,7 @@ from .const import (
     SERVICE_ADD_RECIPE_TO_LIST,
     SERVICE_CREATE_RECIPE,
     SERVICE_DELETE_RECIPE,
+    SERVICE_GET_CATEGORIES,
     SERVICE_GET_RECIPE,
     SERVICE_GET_RECIPES,
     SERVICE_REFRESH,
@@ -952,6 +957,9 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
             vol.Required(ATTR_NAME): cv.string,
             vol.Optional(ATTR_QUANTITY): cv.string,
             vol.Optional(ATTR_NOTES): cv.string,
+            vol.Exclusive(ATTR_CATEGORY, "category_selector"): cv.string,
+            vol.Exclusive(ATTR_CATEGORY_ID, "category_selector"): cv.string,
+            vol.Optional(ATTR_CATEGORY_SET_ID): cv.string,
         },
         func="async_add_item",
     )
@@ -964,8 +972,23 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
             vol.Required(ATTR_ITEM): cv.string,
             vol.Optional(ATTR_QUANTITY): cv.string,
             vol.Optional(ATTR_NOTES): cv.string,
+            vol.Exclusive(ATTR_CATEGORY, "category_selector"): cv.string,
+            vol.Exclusive(ATTR_CATEGORY_ID, "category_selector"): cv.string,
+            vol.Optional(ATTR_CATEGORY_SET_ID): cv.string,
         },
         func="async_update_item",
+    )
+    async_register_platform_entity_service(
+        hass,
+        DOMAIN,
+        SERVICE_GET_CATEGORIES,
+        entity_domain=Platform.TODO,
+        schema={
+            vol.Optional(ATTR_CATEGORY_SET_ID): cv.string,
+            vol.Optional(ATTR_INCLUDE_COUNTS, default=False): cv.boolean,
+        },
+        func="async_get_categories",
+        supports_response=SupportsResponse.ONLY,
     )
     return True
 

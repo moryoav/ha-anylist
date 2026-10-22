@@ -60,7 +60,11 @@ def test_inline_custom_category(
     assert set(attrs) == {
         "items_signature", "items_signature_raw",
         "items_by_category", "items_by_category_signature",
+        "available_categories",
     }
+    [tech] = [value for value in attrs["available_categories"] if value["id"] == "category-tech"]
+    assert tech["total_count"] == 1
+    assert tech["completed_count"] == int(is_checked)
 
 
 @pytest.mark.parametrize("legacy_category", ["dairy", "category-dairy", "Dairy"])
@@ -213,7 +217,7 @@ def test_parsed_custom_category_is_grouped(
             5,
             client_module._field_string(1, category_id)
             + client_module._field_string(5, name)
-            + client_module._field_string(6, match_id),
+            + client_module._field_string(7, match_id),
         )
     category_data = (
         client_module._field_string(1, "list-1")

@@ -26,6 +26,9 @@
     },
     "update_item": {
       "service": "mdi:playlist-edit"
+    },
+    "get_categories": {
+      "service": "mdi:shape"
     }
   }
 }

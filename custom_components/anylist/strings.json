@@ -167,13 +167,25 @@
       "message": "Item name must not be blank."
     },
     "item_fields_required": {
-      "message": "Supply quantity or notes. Use an empty string to clear a field."
+      "message": "Supply at least one of quantity, notes, category, or category_id."
     },
     "todo_item_not_found": {
       "message": "The item was not found in this AnyList shopping list."
     },
     "ambiguous_todo_item": {
       "message": "Multiple matching items were found. Use anylist.update_item with an item UID from todo.get_items."
+    },
+    "category_selector_required": {
+      "message": "Provide either a category name or a category ID."
+    },
+    "category_set_not_found": {
+      "message": "The category set was not found in this list. Refresh the category catalog and use a current set ID."
+    },
+    "category_not_found": {
+      "message": "The category was not found in this list or category set. Refresh the category catalog and use a current name or ID."
+    },
+    "category_ambiguous": {
+      "message": "More than one category matches. Provide a category ID or a category set ID from get_categories."
     }
   },
   "services": {
@@ -249,7 +261,7 @@
     },
     "add_item": {
       "name": "Add item",
-      "description": "Add an item with separate quantity and notes. Reuse a matching checked item and preserve any omitted fields on that item.",
+      "description": "Add an item with separate quantity and notes and an optional category hint. Reuse a matching checked item and preserve its category and omitted fields.",
       "fields": {
         "name": {
           "name": "Name",
@@ -262,12 +274,24 @@
         "notes": {
           "name": "Notes",
           "description": "Item notes. Omit to preserve a reused item's notes. Use an empty string to clear them."
+        },
+        "category": {
+          "name": "Category",
+          "description": "Optional category name or match ID for a new item without a known category. Unknown or ambiguous hints are ignored with a warning. Provide either this or category_id."
+        },
+        "category_id": {
+          "name": "Category ID",
+          "description": "Exact category ID from get_categories, as an alternative to a category name."
+        },
+        "category_set_id": {
+          "name": "Category set ID",
+          "description": "Optional exact set ID from get_categories. Use it to distinguish matching names in different sets."
         }
       }
     },
     "update_item": {
       "name": "Update item",
-      "description": "Change quantity or notes without changing the item's name, category, or checked state. Supply at least one field.",
+      "description": "Change quantity, notes, or a category assignment without changing the item's name or checked state. Omitted fields and assignments in other category sets are preserved. Supply at least one field.",
       "fields": {
         "item": {
           "name": "Item",
@@ -280,6 +304,32 @@
         "notes": {
           "name": "Notes",
           "description": "New notes. Omit to keep the current value. Use an empty string to clear them."
+        },
+        "category": {
+          "name": "Category",
+          "description": "Category name or match ID for an explicit move. Unknown or ambiguous categories reject the entire action. Provide either this or category_id."
+        },
+        "category_id": {
+          "name": "Category ID",
+          "description": "Exact category ID from get_categories, as an alternative to a category name."
+        },
+        "category_set_id": {
+          "name": "Category set ID",
+          "description": "Optional exact set ID from get_categories. Use it to distinguish matching names in different sets."
+        }
+      }
+    },
+    "get_categories": {
+      "name": "Get categories",
+      "description": "Return category names, IDs, and category sets for each targeted AnyList to-do entity, including empty categories. Refresh before reading and optionally include item counts per category.",
+      "fields": {
+        "category_set_id": {
+          "name": "Category set ID",
+          "description": "Optional exact set ID to return only that set's categories."
+        },
+        "include_counts": {
+          "name": "Include item counts",
+          "description": "Include needs_action_count, completed_count, and total_count for each category. Counts are independent for each set."
         }
       }
     }
