@@ -19,7 +19,14 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-from .category import resolve_category_for_item
+from .category import normalize_item_name, resolve_category_for_item
+from .category_catalog import (
+    CategorySelectionError,
+    category_sets,
+    list_categories,
+    select_category,
+    serialize_categories,
+)
 from .client import (
     SORT_ORDER_ALPHABETICAL,
     SORT_ORDER_MANUAL,
@@ -93,6 +100,8 @@ def _ordered_items(shopping_list: Any) -> list[Any]:
 
 class AnyListTodoEntity(AnyListListEntity, TodoListEntity):
     """An AnyList shopping list as a Home Assistant todo entity."""
+
+    _unrecorded_attributes = frozenset({"available_categories"})
 
     # The list is the main feature of its device and takes the device name.
     _attr_name = None
@@ -225,8 +234,13 @@ class AnyListTodoEntity(AnyListListEntity, TodoListEntity):
             sort_keys=True,
             separators=(",", ":"),
         )
+        current_list = find_shopping_list(self.coordinator, self._list_id)
 
         return {
+            "available_categories": (
+                serialize_categories(current_list, include_counts=True)["categories"]
+                if current_list is not None else []
+            ),
             "items_signature": hashlib.sha256(
                 items_signature_raw.encode("utf-8")
             ).hexdigest(),
@@ -298,12 +312,20 @@ class AnyListTodoEntity(AnyListListEntity, TodoListEntity):
         await self._async_create_item(item)
 
     async def async_add_item(
-        self, name: str, quantity: str | None = None, notes: str | None = None
+        self,
+        name: str,
+        quantity: str | None = None,
+        notes: str | None = None,
+        category: str | None = None,
+        category_id: str | None = None,
+        category_set_id: str | None = None,
     ) -> None:
         """Add an item with separate quantity/notes, reusing a checked match.
 
         Omitted fields retain their values when a checked item is reused;
         supplied empty strings clear them. The description stays read only.
+        A supplied category overrides known categorization, including on a
+        reused checked item. Invalid or ambiguous categories reject the action.
         """
         if not name.strip():
             raise ServiceValidationError(
@@ -321,18 +343,106 @@ class AnyListTodoEntity(AnyListListEntity, TodoListEntity):
                     translation_key="ambiguous_todo_item",
                 )
             await self._async_create_item(
-                TodoItem(summary=name, description=notes), quantity
+                TodoItem(summary=name, description=notes),
+                quantity,
+                category=category,
+                category_id=category_id,
+                category_set_id=category_set_id,
             )
 
+    async def async_get_categories(
+        self, category_set_id: str | None = None, include_counts: bool = False
+    ) -> dict[str, Any]:
+        """Return a fresh category catalog, optionally counting items per set."""
+        async with self._item_action_lock:
+            await self._async_refresh_list()
+            try:
+                return serialize_categories(
+                    self.shopping_list,
+                    category_set_id=category_set_id,
+                    include_counts=include_counts,
+                )
+            except CategorySelectionError as err:
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN, translation_key=err.reason
+                ) from err
+
+    async def async_create_category(
+        self, name: str, category_set_id: str | None = None
+    ) -> dict[str, Any]:
+        """Create a custom category in one exact set and read it back.
+
+        A list with one set needs no set selector. Multiple sets require an
+        explicit ID. Reject duplicate normalized names within the chosen set
+        before writing, then verify the new ID in an authoritative refresh.
+        """
+        if not name.strip():
+            raise ServiceValidationError(
+                translation_domain=DOMAIN, translation_key="empty_category_name"
+            )
+        async with self._item_action_lock:
+            await self._async_refresh_list()
+            sets = category_sets(self.shopping_list)
+            if category_set_id is None:
+                if len(sets) != 1:
+                    raise ServiceValidationError(
+                        translation_domain=DOMAIN,
+                        translation_key="category_set_required",
+                    )
+                category_set_id = sets[0]["id"]
+            try:
+                categories = list_categories(self.shopping_list, category_set_id)
+            except CategorySelectionError as err:
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN, translation_key=err.reason
+                ) from err
+            if any(
+                normalize_item_name(value.name) == normalize_item_name(name)
+                for value in categories
+            ):
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN, translation_key="category_already_exists"
+                )
+            index = max((value.sort_index for value in categories), default=-1) + 1
+            created = await self._async_call_client(
+                "create category",
+                self._client.create_category,
+                self._list_id,
+                category_set_id,
+                name.strip(),
+                index,
+            )
+            await self._async_refresh_list()
+            records = serialize_categories(
+                self.shopping_list, category_set_id=category_set_id
+            )["categories"]
+            match = next(
+                (value for value in records if value["id"] == created.id), None
+            )
+            if match is None:
+                raise HomeAssistantError(
+                    translation_domain=DOMAIN,
+                    translation_key="category_creation_unconfirmed",
+                )
+            return match
+
     async def async_update_item(
-        self, item: str, quantity: str | None = None, notes: str | None = None
+        self,
+        item: str,
+        quantity: str | None = None,
+        notes: str | None = None,
+        category: str | None = None,
+        category_id: str | None = None,
+        category_set_id: str | None = None,
     ) -> None:
         """Update one item by UID or exact name without changing other fields.
 
         At least one field must be supplied. Omitted fields are preserved and
-        empty strings clear fields. Duplicate names require a UID.
+        empty strings clear quantity or notes. Duplicate names require a UID.
+        A supplied category is an explicit move within its set. Validate it
+        before changing any field, and preserve assignments in all other sets.
         """
-        if quantity is None and notes is None:
+        if all(value is None for value in (quantity, notes, category, category_id)):
             raise ServiceValidationError(
                 translation_domain=DOMAIN, translation_key="item_fields_required"
             )
@@ -351,6 +461,32 @@ class AnyListTodoEntity(AnyListListEntity, TodoListEntity):
                     translation_domain=DOMAIN, translation_key="ambiguous_todo_item"
                 )
             current = matches[0]
+            if any(
+                value is not None for value in (category, category_id, category_set_id)
+            ):
+                try:
+                    selected = select_category(
+                        self.shopping_list,
+                        name=category,
+                        category_id=category_id,
+                        category_set_id=category_set_id,
+                    )
+                except CategorySelectionError as err:
+                    raise ServiceValidationError(
+                        translation_domain=DOMAIN, translation_key=err.reason
+                    ) from err
+                await self._async_call_client(
+                    "update todo category and supplied fields",
+                    self._client.update_item_category,
+                    self._list_id,
+                    current.id,
+                    selected,
+                    quantity,
+                    notes,
+                    current.details,
+                )
+                await self._async_refresh_list()
+                return
             await self._async_call_client(
                 "update todo quantity and notes",
                 self._client.update_item_details,
@@ -363,31 +499,69 @@ class AnyListTodoEntity(AnyListListEntity, TodoListEntity):
             await self._async_refresh_list()
 
     async def _async_create_item(
-        self, item: TodoItem, quantity: str | None = None
+        self,
+        item: TodoItem,
+        quantity: str | None = None,
+        *,
+        category: str | None = None,
+        category_id: str | None = None,
+        category_set_id: str | None = None,
     ) -> None:
         """Share category, insertion-order, and checked-item reuse behavior."""
+        selected = None
+        if any(value is not None for value in (category, category_id, category_set_id)):
+            try:
+                selected = select_category(
+                    self.shopping_list,
+                    name=category,
+                    category_id=category_id,
+                    category_set_id=category_set_id,
+                )
+            except CategorySelectionError as err:
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN, translation_key=err.reason
+                ) from err
         # Check for existing checked-off item with same name (case insensitive)
-        existing_item = self._find_checked_item_by_name(item.summary) if item.summary else None
+        existing_item = (
+            self._find_checked_item_by_name(item.summary) if item.summary else None
+        )
 
         if existing_item:
-            if quantity is not None or item.description is not None:
+            if (
+                selected is not None
+                or quantity is not None
+                or item.description is not None
+            ):
                 current = next(
-                    candidate for candidate in self.shopping_list.items
+                    candidate
+                    for candidate in self.shopping_list.items
                     if candidate.id == existing_item.uid
                 )
-                await self._async_call_client(
-                    "update reused todo quantity and notes",
-                    self._client.update_item_details,
-                    self._list_id,
-                    current.id,
-                    quantity,
-                    item.description,
-                    current.details,
-                )
+                if selected is not None:
+                    await self._async_call_client(
+                        "update reused todo category and supplied fields",
+                        self._client.update_item_category,
+                        self._list_id,
+                        current.id,
+                        selected,
+                        quantity,
+                        item.description,
+                        current.details,
+                    )
+                else:
+                    await self._async_call_client(
+                        "update reused todo quantity and notes",
+                        self._client.update_item_details,
+                        self._list_id,
+                        current.id,
+                        quantity,
+                        item.description,
+                        current.details,
+                    )
             # Reuse existing item by unchecking it
             _LOGGER.debug(
                 "Reusing existing checked item '%s' instead of creating duplicate",
-                item.summary
+                item.summary,
             )
             await self._async_call_client(
                 "uncheck reused todo item",
@@ -396,6 +570,19 @@ class AnyListTodoEntity(AnyListListEntity, TodoListEntity):
                 existing_item.uid,
             )
         else:
+            if selected is not None:
+                await self._async_call_client(
+                    "create todo item in category",
+                    self._client.add_item_to_category,
+                    self._list_id,
+                    item.summary,
+                    selected,
+                    quantity,
+                    item.description,
+                    inserts_new_items_at_top(self.shopping_list),
+                )
+                await self._async_refresh_after_mutation()
+                return
             category_resolution = resolve_category_for_item(
                 item.summary,
                 self._list_id,
@@ -408,7 +595,11 @@ class AnyListTodoEntity(AnyListListEntity, TodoListEntity):
                 find_shopping_list(self.coordinator, self._list_id)
             )
 
-            if not item.description and quantity is None and category_resolution is None:
+            if (
+                not item.description
+                and quantity is None
+                and category_resolution is None
+            ):
                 await self._async_call_client(
                     "create todo item",
                     self._client.add_item,
@@ -542,11 +733,11 @@ class AnyListTodoEntity(AnyListListEntity, TodoListEntity):
         """Publish the write before a following todo service reads cached items."""
         await self._async_refresh_list()
 
-    async def _async_call_client(self, action: str, func, *args) -> None:
+    async def _async_call_client(self, action: str, func, *args) -> Any:
         """Run a todo mutation with logging and timeout protection."""
         _LOGGER.debug("AnyList todo mutation started: %s", action)
         try:
-            await async_call_with_timeout(
+            result = await async_call_with_timeout(
                 self.hass,
                 func,
                 *args,
@@ -563,3 +754,4 @@ class AnyListTodoEntity(AnyListListEntity, TodoListEntity):
                 },
             ) from err
         _LOGGER.debug("AnyList todo mutation succeeded: %s", action)
+        return result
