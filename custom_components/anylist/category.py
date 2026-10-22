@@ -69,6 +69,11 @@ def _resolve_from_assignments(
             if normalize_item_name(getattr(assignment, "item_name", None)) != normalized_name:
                 continue
 
+            # An empty ID is an explicit clear, not a missing learned rule.
+            # Do not restore an older category from an item or a favourite.
+            if getattr(assignment, "category_id", None) == "":
+                return True, None
+
             category = getattr(assignment, "category_match_id", None)
             if category is None:
                 category = getattr(assignment, "category_name", None)

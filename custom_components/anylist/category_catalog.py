@@ -150,7 +150,9 @@ def item_category(
                     if getattr(value, attribute, None) == legacy
                 ]
                 if matches:
-                    return matches[0] if len(matches) == 1 else None
+                    if len(matches) == 1:
+                        return matches[0]
+                    break
     if use_default:
         default_id = next(
             (

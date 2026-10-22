@@ -185,6 +185,9 @@ async def test_discovery_is_fresh_and_attribute_includes_empty_categories(
         hass.states.get(ENTITY).attributes["available_categories"]
         == counted["categories"]
     )
+    recorder_exclusions = hass.states.get(ENTITY).state_info["unrecorded_attributes"]
+    assert "available_categories" in recorder_exclusions
+    assert "items_by_category" not in recorder_exclusions
     category_client.lists[0].categories[1].name = "Renamed in app"
     fresh = (await call(hass, "get_categories", category_set_id="set-a"))[ENTITY]
     assert fresh["category_names"] == ["Dairy", "Renamed in app", "Other"]
@@ -309,6 +312,29 @@ async def test_known_category_wins_within_the_requested_set(hass, category_clien
     assert (
         category_client.lists[0].items[-1].category_assignments[0].category_id
         == "cold-a"
+    )
+
+
+@pytest.mark.parametrize("source", ["items", "favourites"])
+async def test_cleared_learned_category_blocks_legacy_fallback(
+    hass, category_client, source
+):
+    """Keep an explicit learned clear when adding without a category hint."""
+    category_client.lists[0].category_assignments = [
+        api.ItemCategoryAssignment("cleared-rule", "set-a", "", item_name="Scan")
+    ]
+    stale_item = fake_item("stale", "Scan", category="dairy")
+    if source == "items":
+        category_client.lists[0].items.append(stale_item)
+    else:
+        favourite = fake_list("favourite", items=[stale_item])
+        favourite.shopping_list_id = "list-1"
+        category_client.favourites = [favourite]
+    await call(hass, "add_item", name="Scan")
+    assert ("add_item", ("list-1", "Scan")) in category_client.calls
+    assert not any(
+        name in ("add_item_with_details", "add_item_to_category")
+        for name, _ in category_client.calls
     )
 
 

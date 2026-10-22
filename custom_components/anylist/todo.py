@@ -100,6 +100,8 @@ def _ordered_items(shopping_list: Any) -> list[Any]:
 class AnyListTodoEntity(AnyListListEntity, TodoListEntity):
     """An AnyList shopping list as a Home Assistant todo entity."""
 
+    _unrecorded_attributes = frozenset({"available_categories"})
+
     # The list is the main feature of its device and takes the device name.
     _attr_name = None
 

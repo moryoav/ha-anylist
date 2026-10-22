@@ -189,6 +189,28 @@ def test_catalog_includes_empty_categories_and_optional_counts(catalog_list):
         serialize_categories(catalog_list, category_set_id="unknown")
 
 
+def test_ambiguous_legacy_category_counts_in_the_sets_default(catalog_list):
+    """Keep ambiguous legacy labels in totals without learning a guessed category."""
+    catalog_list.categories.append(
+        api.ListCategory("north-alternative", "list-a", "north", "Cold aisle", "dairy")
+    )
+    item = api.ListItem("one", "list-a", "Milk", category="dairy")
+    catalog_list.items = [item]
+    assert item_category(catalog_list, item, "north").id == "north-other"
+    assert item_category(catalog_list, item, "north", use_default=False) is None
+    result = serialize_categories(
+        catalog_list, category_set_id="north", include_counts=True
+    )
+    assert sum(value["total_count"] for value in result["categories"]) == 1
+    assert (
+        next(value for value in result["categories"] if value["id"] == "north-other")[
+            "needs_action_count"
+        ]
+        == 1
+    )
+    assert known_category(catalog_list, "Milk", [], "north") is None
+
+
 def test_rules_do_not_merge_identical_aliases_across_sets(catalog_list):
     """Scope learned rules by set rather than treating every Dairy as identical."""
     catalog_list.category_assignments = [

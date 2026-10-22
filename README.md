@@ -221,6 +221,8 @@ calculated separately for each category set, using its default category for
 items without a valid assignment. Adding the counts across different sets can
 count an item more than once. The entity's `available_categories` attribute
 always includes these counts.
+The catalog attribute is available to live templates and automations and is
+excluded from recorder history to avoid storing it on every state change.
 
 An optional `category_set_id` filters the action to one exact set. Names and
 match IDs can repeat across sets, so the unfiltered `category_names` array can
