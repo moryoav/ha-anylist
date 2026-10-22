@@ -125,6 +125,38 @@ def item_category(
     or deleted categories use the set's configured default for item counts.
     """
     categories = list_categories(shopping_list, category_set_id)
+    default_id = next(
+        (
+            value["default_category_id"]
+            for value in category_sets(shopping_list)
+            if value["id"] == category_set_id
+        ),
+        None,
+    )
+    return _item_category_in_set(
+        item,
+        shopping_list.id,
+        category_set_id,
+        categories,
+        default_category_id=default_id,
+        use_default=use_default,
+    )
+
+
+def _item_category_in_set(
+    item: Any,
+    list_id: str,
+    category_set_id: str,
+    categories: list[Any],
+    *,
+    default_category_id: str | None,
+    use_default: bool = True,
+) -> Any | None:
+    """Resolve with prepared set data and an explicit, possibly absent default.
+
+    The required default argument preserves None as no configured default;
+    this path never reloads category sets or scans the full list's catalog.
+    """
     assignments = list(getattr(item, "category_assignments", []) or [])
     if not assignments and (assignment := getattr(item, "category_assignment", None)):
         assignments.append(assignment)
@@ -132,7 +164,7 @@ def item_category(
         value
         for value in assignments
         if getattr(value, "category_group_id", None) == category_set_id
-        and getattr(value, "list_id", None) in (None, shopping_list.id)
+        and getattr(value, "list_id", None) in (None, list_id)
     ]
     if matching:
         category_id = matching[-1].category_id
@@ -153,15 +185,9 @@ def item_category(
                         return matches[0]
                     break
     if use_default:
-        default_id = next(
-            (
-                value["default_category_id"]
-                for value in category_sets(shopping_list)
-                if value["id"] == category_set_id
-            ),
-            None,
+        return next(
+            (value for value in categories if value.id == default_category_id), None
         )
-        return next((value for value in categories if value.id == default_id), None)
     return None
 
 
@@ -181,12 +207,21 @@ def serialize_categories(
     set_names = {value["id"]: value["name"] for value in sets}
     counts = {(value.category_group_id, value.id): [0, 0] for value in categories}
     if include_counts:
+        categories_by_set = {value["id"]: [] for value in sets}
+        for category in categories:
+            categories_by_set[category.category_group_id].append(category)
         for item in getattr(shopping_list, "items", []):
             checked = bool(
                 getattr(item, "is_checked", False) or getattr(item, "completed", False)
             )
             for value in sets:
-                category = item_category(shopping_list, item, value["id"])
+                category = _item_category_in_set(
+                    item,
+                    shopping_list.id,
+                    value["id"],
+                    categories_by_set[value["id"]],
+                    default_category_id=value["default_category_id"],
+                )
                 if category is not None:
                     counts[(category.category_group_id, category.id)][int(checked)] += 1
     records = []

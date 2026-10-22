@@ -6,7 +6,7 @@
   and optional item counts, including empty categories.
 - Expose the category catalog and counts in the `available_categories`
   attribute of each AnyList to-do entity, excluding the catalog from recorder
-  history.
+  history and reusing category set data while counting items.
 - Add `anylist.create_category` to create custom categories in a selected set
   and return their IDs after reading them back from AnyList.
 - Apply explicitly supplied categories in `anylist.add_item`, including when

@@ -216,3 +216,49 @@ def test_foreign_assignment_cannot_override_local_category(catalog_list):
         "one", "list-a", "Milk", category="dairy", category_assignments=[foreign]
     )
     assert item_category(catalog_list, item, "north").id == "north-cold"
+
+
+def test_counting_scans_catalog_independently_of_item_count(catalog_list):
+    """Keep full-catalog work bounded as item counts grow, retaining null defaults."""
+
+    class ObservedCategories(list):
+        """Count iterations over the full source catalog, not per-set lookups."""
+
+        def __init__(self, values):
+            """Keep the original categories and initialize a traversal counter."""
+            super().__init__(values)
+            self.scans = 0
+
+        def __iter__(self):
+            """Observe a full-catalog traversal without changing its contents."""
+            self.scans += 1
+            return super().__iter__()
+
+    observed = ObservedCategories(catalog_list.categories)
+    catalog_list.categories = observed
+    catalog_list.category_sets[1].default_category_id = None
+    traversals = []
+    for count in (1, 500):
+        catalog_list.items = [
+            api.ListItem(str(index), "list-a", "Unknown") for index in range(count)
+        ]
+        observed.scans = 0
+        result = serialize_categories(catalog_list, include_counts=True)
+        traversals.append(observed.scans)
+        assert (
+            sum(
+                value["total_count"]
+                for value in result["categories"]
+                if value["category_set_id"] == "north"
+            )
+            == count
+        )
+        assert (
+            sum(
+                value["total_count"]
+                for value in result["categories"]
+                if value["category_set_id"] == "south"
+            )
+            == 0
+        )
+    assert traversals[1] == traversals[0]
