@@ -312,6 +312,12 @@ See the [Alexa, AnyList, and dashboard synchronization guide](docs/shopping-list
 for a complete shopping list sync automation, a category-based kitchen dashboard
 card, screenshots, and setup instructions.
 
+## AI Category Automation
+
+I use an [AI Task category automation](docs/ai-category-automation.md) to classify
+unchecked, uncategorized items and reuse or create categories. The guide includes
+the dedicated AI Task setup, complete automation YAML, and testing instructions.
+
 ## Examples
 
 Trigger an automation whenever the actual contents of a shopping list change:

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Document an optional AI Task automation for classifying uncategorized shopping
+  list items, including AI Task setup, complete YAML, and testing guidance.
+
 ## 0.10.0 - 2026-10-22
 
 - Add `anylist.get_categories` with category names, IDs, category set details,
