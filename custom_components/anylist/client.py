@@ -807,14 +807,16 @@ def _parse_recipes_response(data: bytes) -> list[Recipe]:
     ]
 
 
-def _pb_operation_metadata(operation_id: str, handler_id: str, user_id: str) -> bytes:
+def _pb_operation_metadata(
+    operation_id: str, handler_id: str, user_id: str, operation_class: int = 0
+) -> bytes:
     """Build PBOperationMetadata."""
     return b"".join(
         (
             _field_string(1, operation_id),
             _field_string(2, handler_id),
             _field_string(3, user_id),
-            _field_int32(4, 0),
+            _field_int32(4, operation_class),
         )
     )
 
@@ -934,17 +936,25 @@ def _pb_list_operation(
     updated_value: str | None = None,
     original_value: str | None = None,
     shopping_list: bytes | None = None,
+    operation_class: int = 0,
+    updated_category: bytes | None = None,
 ) -> bytes:
     """Build PBListOperation."""
     return b"".join(
         (
-            _field_message(1, _pb_operation_metadata(_generate_id(), handler_id, user_id)),
+            _field_message(
+                1,
+                _pb_operation_metadata(
+                    _generate_id(), handler_id, user_id, operation_class
+                ),
+            ),
             _field_string(2, list_id),
             _field_string(3, list_item_id),
             _field_string(4, updated_value),
             _field_string(5, original_value),
             _field_message(6, list_item),
             _field_message(7, shopping_list),
+            _field_message(17, updated_category),
         )
     )
 
@@ -1336,6 +1346,46 @@ class AnyListClient:
             _assignment_for_category(category),
             at_top,
         )
+
+    def create_category(
+        self, list_id: str, category_set_id: str, name: str, sort_index: int
+    ) -> ListCategory:
+        """Append a custom category using the native v2 category operation.
+
+        PBListOperation.updatedCategory is field 17 and ListCategoryOperation
+        is operation class 3. Category matching is derived from the name; the
+        shopping_cart icon is independent of that matching identifier.
+        """
+        if not list_id or not category_set_id or not name.strip():
+            raise AnyListError("A list, category set, and category name are required")
+        category = ListCategory(
+            id=_generate_id(),
+            list_id=list_id,
+            category_group_id=category_set_id,
+            name=name.strip(),
+            match_id=_custom_category_match_id(name.strip()),
+            icon="shopping_cart",
+            sort_index=sort_index,
+        )
+        payload = b"".join(
+            (
+                _field_string(1, category.id),
+                _field_string(3, category.category_group_id),
+                _field_string(4, category.list_id),
+                _field_string(5, category.name),
+                _field_string(6, category.icon),
+                _field_int32(9, category.sort_index),
+            )
+        )
+        operation = _pb_list_operation(
+            handler_id="create-category",
+            user_id=self._user_id,
+            list_id=list_id,
+            operation_class=3,
+            updated_category=payload,
+        )
+        self.post("data/shopping-lists/update-v2", _pb_list_operation_list([operation]))
+        return category
 
     def update_item_details(
         self,

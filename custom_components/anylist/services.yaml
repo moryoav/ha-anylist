@@ -1,6 +1,6 @@
 add_item:
   name: Add item
-  description: Add an item with separate quantity and notes and an optional category hint. Reuse a matching checked item and preserve its category and omitted fields.
+  description: Add an item or reuse a matching checked item. A supplied category overrides its previous category. Omitted quantity, notes, and category assignments are preserved on reused items.
   target:
     entity:
       integration: anylist
@@ -28,7 +28,7 @@ add_item:
           multiline: true
     category:
       name: Category
-      description: Optional category name or match ID for a new item without a known category. Unknown or ambiguous hints are ignored with a warning. Provide either this or category_id.
+      description: Existing category name or match ID. Overrides known categorization, including on reused checked items. Invalid or ambiguous selections reject the action. Provide either this or category_id.
       example: Dairy
       selector:
         text:
@@ -88,6 +88,28 @@ update_item:
     category_set_id:
       name: Category set ID
       description: Optional exact set ID from get_categories. Use it to distinguish matching names in different sets.
+      advanced: true
+      selector:
+        text:
+
+create_category:
+  name: Create category
+  description: Create a custom category and optionally return its ID and metadata. Reject duplicate names within the selected set. Does not create items or change the default category.
+  target:
+    entity:
+      integration: anylist
+      domain: todo
+  fields:
+    name:
+      name: Name
+      description: Non-empty name for the new category. Names ignore case and extra whitespace when checking for duplicates within the set.
+      required: true
+      example: Household supplies
+      selector:
+        text:
+    category_set_id:
+      name: Category set ID
+      description: Exact set ID from get_categories. Required when the list has multiple sets; otherwise the only set is used.
       advanced: true
       selector:
         text:

@@ -186,6 +186,18 @@
     },
     "category_ambiguous": {
       "message": "More than one category matches. Provide a category ID or a category set ID from get_categories."
+    },
+    "empty_category_name": {
+      "message": "The category name must not be empty."
+    },
+    "category_set_required": {
+      "message": "Specify an existing category set ID from get_categories. Only a list with one set can omit it."
+    },
+    "category_already_exists": {
+      "message": "A category with this name already exists in the selected set."
+    },
+    "category_creation_unconfirmed": {
+      "message": "The new category could not be confirmed after refreshing AnyList. Check get_categories before trying again."
     }
   },
   "services": {
@@ -261,7 +273,7 @@
     },
     "add_item": {
       "name": "Add item",
-      "description": "Add an item with separate quantity and notes and an optional category hint. Reuse a matching checked item and preserve its category and omitted fields.",
+      "description": "Add an item or reuse a matching checked item. A supplied category overrides its previous category. Omitted quantity, notes, and category assignments are preserved on reused items.",
       "fields": {
         "name": {
           "name": "Name",
@@ -277,7 +289,7 @@
         },
         "category": {
           "name": "Category",
-          "description": "Optional category name or match ID for a new item without a known category. Unknown or ambiguous hints are ignored with a warning. Provide either this or category_id."
+          "description": "Existing category name or match ID. Overrides known categorization, including on reused checked items. Invalid or ambiguous selections reject the action. Provide either this or category_id."
         },
         "category_id": {
           "name": "Category ID",
@@ -330,6 +342,20 @@
         "include_counts": {
           "name": "Include item counts",
           "description": "Include needs_action_count, completed_count, and total_count for each category. Counts are independent for each set."
+        }
+      }
+    },
+    "create_category": {
+      "name": "Create category",
+      "description": "Create a custom category and optionally return its ID and metadata. Reject duplicate names within the selected set. Does not create items or change the default category.",
+      "fields": {
+        "name": {
+          "name": "Name",
+          "description": "Non-empty name for the new category. Names ignore case and extra whitespace when checking for duplicates within the set."
+        },
+        "category_set_id": {
+          "name": "Category set ID",
+          "description": "Exact set ID from get_categories. Required when the list has multiple sets; otherwise the only set is used."
         }
       }
     }

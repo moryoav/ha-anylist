@@ -27,6 +27,7 @@ class CategoryClient(FakeAnyListClient):
 
     fail_reads = False
     fail_after_write = False
+    ignore_category_write = False
 
     def get_lists(self):
         """Return independent snapshots and model an unavailable upstream."""
@@ -56,6 +57,25 @@ class CategoryClient(FakeAnyListClient):
         item.category = category.match_id
         self.lists[0].items.insert(0 if at_top else len(self.lists[0].items), item)
         self.added_at_top.append(at_top)
+
+    def create_category(self, list_id, category_set_id, name, sort_index):
+        """Append a category while allowing a simulated unconfirmed server write."""
+        self.calls.append(
+            ("create_category", (list_id, category_set_id, name, sort_index))
+        )
+        category = api.ListCategory(
+            "created-category-" + str(len(self.calls)),
+            list_id,
+            category_set_id,
+            name,
+            name.lower().replace(" ", "-"),
+            sort_index=sort_index,
+        )
+        if not self.ignore_category_write:
+            self.lists[0].categories.append(category)
+        if self.fail_after_write:
+            self.fail_reads = True
+        return category
 
     def update_item_category(
         self,
@@ -162,7 +182,7 @@ async def call(hass, action, **data):
         action,
         {"entity_id": ENTITY, **data},
         blocking=True,
-        return_response=action == "get_categories",
+        return_response=action in ("get_categories", "create_category"),
     )
 
 
@@ -263,55 +283,117 @@ async def test_explicit_set_scopes_a_duplicate_match_id(hass, category_client):
     )
 
 
+@pytest.mark.parametrize("name", ["New", "Original"])
 @pytest.mark.parametrize(
     "selector",
     [
         {"category": "Missing category"},
+        {"category": ""},
+        {"category": "  "},
         {"category_id": "missing-id"},
         {"category": "Dairy", "category_set_id": "missing-set"},
+        {"category_id": "cold-b", "category_set_id": "set-a"},
         {"category_set_id": "set-a"},
     ],
 )
-async def test_bad_add_hint_warns_without_losing_item(
-    hass, category_client, caplog, selector
-):
-    """Treat failed category hints as best effort while preserving item input."""
-    await call(hass, "add_item", name="New", **selector)
-    assert category_client.lists[0].items[-1].name == "New"
-    assert "Ignoring the AnyList category hint" in caplog.text
+async def test_invalid_add_changes_nothing(hass, category_client, name, selector):
+    """Reject a bad category before adding, changing fields, or unchecking."""
+    before = deepcopy(category_client.lists)
+    with pytest.raises(ServiceValidationError):
+        await call(
+            hass, "add_item", name=name, quantity="7", notes="Do not write", **selector
+        )
+    assert category_client.lists == before
+    assert not any(
+        n.startswith(("add_item", "update_item", "uncheck"))
+        for n, _ in category_client.calls
+    )
 
 
-async def test_ambiguous_add_does_not_choose_the_first_set(
-    hass, category_client, caplog
-):
-    """Add normally when two category names collide across sets."""
+async def test_ambiguous_add_does_not_choose_the_first_set(hass, category_client):
+    """Require an exact selection when category names collide across sets."""
     category_client.lists[0].categories[3].name = "Dairy"
-    await call(hass, "add_item", name="New", category="Dairy")
-    assert "more than one category matches" in caplog.text
-    assert not any(name == "add_item_to_category" for name, _ in category_client.calls)
+    with pytest.raises(ServiceValidationError):
+        await call(hass, "add_item", name="New", category="Dairy")
+    assert not any(n.startswith("add_item") for n, _ in category_client.calls)
 
 
-async def test_blank_hint_is_silent_and_reuse_ignores_category(
-    hass, category_client, caplog
+@pytest.mark.parametrize("with_fields", [False, True])
+async def test_reuse_applies_explicit_category_and_preserves_metadata(
+    hass, category_client, with_fields
 ):
-    """Keep blank hints harmless and preserve a reused item's complete metadata."""
+    """Override a checked item's old category while preserving its UID and other set."""
     before = deepcopy(vars(category_client.lists[0].items[0]))
-    await call(hass, "add_item", name="Original", category="Missing category")
+    fields = {"quantity": "5", "notes": "Updated"} if with_fields else {}
+    await call(hass, "add_item", name="Original", category_id="tools-a", **fields)
+    item = category_client.lists[0].items[0]
+    assert (
+        len(category_client.lists[0].items) == 1
+        and item.id == "original"
+        and not item.is_checked
+    )
+    assert (
+        item.photo_ids == before["photo_ids"]
+        and item.product_upc == before["product_upc"]
+    )
+    assert (
+        next(v for v in item.category_assignments if v.category_group_id == "set-b")
+        == before["category_assignments"][1]
+    )
+    assert (
+        next(
+            v for v in item.category_assignments if v.category_group_id == "set-a"
+        ).category_id
+        == "tools-a"
+    )
+    assert item.quantity == ("5" if with_fields else "2")
+    assert item.details == ("Updated" if with_fields else "Keep notes")
+
+
+async def test_reuse_without_category_preserves_assignments(hass, category_client):
+    """Retain previous unchecked-item reuse behavior when category is omitted."""
+    before = deepcopy(vars(category_client.lists[0].items[0]))
+    await call(hass, "add_item", name="Original")
     assert vars(category_client.lists[0].items[0]) == {**before, "is_checked": False}
-    await call(hass, "add_item", name="New", category="  ")
-    assert "category hint" not in caplog.text
 
 
-async def test_known_category_wins_within_the_requested_set(hass, category_client):
-    """Preserve app corrections without borrowing a rule from another set."""
-    category_client.lists[0].category_assignments = [
-        api.ItemCategoryAssignment("rule-a", "set-a", "cold-a", item_name="Scan"),
-        api.ItemCategoryAssignment("rule-b", "set-b", "cold-b", item_name="Scan"),
-    ]
+@pytest.mark.parametrize("source", ["rules", "items", "favourites"])
+async def test_explicit_category_overrides_every_known_source(
+    hass, category_client, source
+):
+    """Honor the caller's choice even when AnyList knows a different category."""
+    if source == "rules":
+        category_client.lists[0].category_assignments = [
+            api.ItemCategoryAssignment(
+                "rule-a", "set-a", "cold-a", item_name="Scan", category_match_id="dairy"
+            )
+        ]
+    else:
+        stale = fake_item("old", "Scan", category="dairy")
+        if source == "items":
+            category_client.lists[0].items.append(stale)
+        else:
+            favourite = fake_list("favourite", items=[stale])
+            favourite.shopping_list_id = "list-1"
+            category_client.favourites = [favourite]
     await call(hass, "add_item", name="Scan", category="Workshop Supplies")
     assert (
         category_client.lists[0].items[-1].category_assignments[0].category_id
-        == "cold-a"
+        == "tools-a"
+    )
+
+
+async def test_omitted_category_keeps_known_categorization(hass, category_client):
+    """Keep the learned Dairy association on an add with no category input."""
+    category_client.lists[0].category_assignments = [
+        api.ItemCategoryAssignment(
+            "rule-a", "set-a", "cold-a", item_name="Milk", category_match_id="dairy"
+        )
+    ]
+    await call(hass, "add_item", name="Milk")
+    assert any(
+        n == "add_item_with_details" and args[4] == "dairy"
+        for n, args in category_client.calls
     )
 
 
@@ -319,7 +401,7 @@ async def test_known_category_wins_within_the_requested_set(hass, category_clien
 async def test_cleared_learned_category_blocks_legacy_fallback(
     hass, category_client, source
 ):
-    """Keep an explicit learned clear when adding without a category hint."""
+    """Keep an explicit learned clear when adding without a category input."""
     category_client.lists[0].category_assignments = [
         api.ItemCategoryAssignment("cleared-rule", "set-a", "", item_name="Scan")
     ]
@@ -460,3 +542,120 @@ async def test_unknown_discovery_set_does_not_write(hass, category_client):
         name.startswith(("add_item", "update_item"))
         for name, _ in category_client.calls
     )
+
+
+async def test_create_category_returns_fresh_identity_and_updates_attribute(
+    hass, category_client
+):
+    """Read a new category back and use its returned ID in a following add."""
+    category_client.lists[0].categories[1].sort_index = 4
+    response = (
+        await call(
+            hass, "create_category", name="  Home Supplies  ", category_set_id="set-a"
+        )
+    )[ENTITY]
+    assert (
+        response["name"] == "Home Supplies" and response["category_set_id"] == "set-a"
+    )
+    assert response["category_set_name"] == "First store"
+    assert category_client.lists[0].categories[-1].sort_index == 5
+    assert any(
+        value["id"] == response["id"]
+        for value in hass.states.get(ENTITY).attributes["available_categories"]
+    )
+    await call(hass, "add_item", name="Scanner", category_id=response["id"])
+    assert (
+        category_client.lists[0].items[-1].category_assignments[0].category_id
+        == response["id"]
+    )
+
+
+async def test_create_category_single_set_and_response_optional(hass, category_client):
+    """Infer a single set and allow an automation that does not request a response."""
+    category_client.lists[0].category_sets = [category_client.lists[0].category_sets[0]]
+    category_client.lists[0].categories = [
+        value
+        for value in category_client.lists[0].categories
+        if value.category_group_id == "set-a"
+    ]
+    await hass.services.async_call(
+        DOMAIN,
+        "create_category",
+        {"entity_id": ENTITY, "name": "Hardware"},
+        blocking=True,
+    )
+    assert category_client.lists[0].categories[-1].category_group_id == "set-a"
+
+
+async def test_create_category_accepts_empty_set_and_same_name_in_another_set(
+    hass, category_client
+):
+    """Permit a name that exists elsewhere while targeting a specific empty set."""
+    response = (
+        await call(hass, "create_category", name="Dairy", category_set_id="empty")
+    )[ENTITY]
+    assert response["category_set_id"] == "empty"
+    assert category_client.lists[0].categories[-1].sort_index == 0
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"name": ""},
+        {"name": "  "},
+        {"name": "New"},
+        {"name": "New", "category_set_id": "foreign"},
+        {"name": " DAIRY ", "category_set_id": "set-a"},
+    ],
+)
+async def test_invalid_create_category_never_writes(hass, category_client, fields):
+    """Reject blank names, unspecified multiple sets, and same-set duplicates."""
+    before = deepcopy(category_client.lists)
+    with pytest.raises(ServiceValidationError):
+        await call(hass, "create_category", **fields)
+    assert category_client.lists == before
+    assert not any(name == "create_category" for name, _ in category_client.calls)
+
+
+@pytest.mark.parametrize("phase", ["before", "after"])
+async def test_create_category_reports_failed_cloud_reads(hass, category_client, phase):
+    """Fail pre-write reads safely and report a failed post-write confirmation."""
+    category_client.fail_reads = phase == "before"
+    category_client.fail_after_write = phase == "after"
+    with pytest.raises(HomeAssistantError):
+        await call(hass, "create_category", name="New", category_set_id="set-a")
+    assert sum(name == "create_category" for name, _ in category_client.calls) == (
+        0 if phase == "before" else 1
+    )
+
+
+async def test_create_category_requires_server_readback(hass, category_client):
+    """Report an ignored server write rather than returning a fabricated category."""
+    category_client.ignore_category_write = True
+    with pytest.raises(HomeAssistantError):
+        await call(hass, "create_category", name="Missing", category_set_id="set-a")
+
+
+async def test_concurrent_category_creation_rechecks_duplicate_names(
+    hass, category_client
+):
+    """Serialize creates so competing requests do not create same-set duplicates."""
+    results = await asyncio.gather(
+        call(hass, "create_category", name="New", category_set_id="set-a"),
+        call(hass, "create_category", name=" NEW ", category_set_id="set-a"),
+        return_exceptions=True,
+    )
+    assert sum(isinstance(value, ServiceValidationError) for value in results) == 1
+    assert sum(name == "create_category" for name, _ in category_client.calls) == 1
+
+
+async def test_failed_reused_category_write_does_not_uncheck(hass, category_client):
+    """Keep the checked state when the requested category operation fails."""
+    before = deepcopy(category_client.lists)
+    with patch.object(
+        category_client, "update_item_category", side_effect=RuntimeError("offline")
+    ):
+        with pytest.raises(HomeAssistantError):
+            await call(hass, "add_item", name="Original", category_id="tools-a")
+    assert category_client.lists == before
+    assert not any(name == "uncheck_item" for name, _ in category_client.calls)

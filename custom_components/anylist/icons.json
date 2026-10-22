@@ -29,6 +29,9 @@
     },
     "get_categories": {
       "service": "mdi:shape"
+    },
+    "create_category": {
+      "service": "mdi:shape-plus"
     }
   }
 }

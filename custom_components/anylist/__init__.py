@@ -75,6 +75,7 @@ from .const import (
     SERVICE_ADD_ITEM,
     SERVICE_ADD_RECIPE_TO_LIST,
     SERVICE_CREATE_RECIPE,
+    SERVICE_CREATE_CATEGORY,
     SERVICE_DELETE_RECIPE,
     SERVICE_GET_CATEGORIES,
     SERVICE_GET_RECIPE,
@@ -989,6 +990,18 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
         },
         func="async_get_categories",
         supports_response=SupportsResponse.ONLY,
+    )
+    async_register_platform_entity_service(
+        hass,
+        DOMAIN,
+        SERVICE_CREATE_CATEGORY,
+        entity_domain=Platform.TODO,
+        schema={
+            vol.Required(ATTR_NAME): cv.string,
+            vol.Optional(ATTR_CATEGORY_SET_ID): cv.string,
+        },
+        func="async_create_category",
+        supports_response=SupportsResponse.OPTIONAL,
     )
     return True
 

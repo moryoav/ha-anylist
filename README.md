@@ -129,6 +129,7 @@ Shopping list and recipe actions are available for automations, scripts, and Nod
 - `anylist.add_item`
 - `anylist.update_item`
 - `anylist.get_categories`
+- `anylist.create_category`
 - `anylist.refresh`
 - `anylist.get_recipes`
 - `anylist.search_recipes`
@@ -229,7 +230,7 @@ match IDs can repeat across sets, so the unfiltered `category_names` array can
 contain duplicates. IDs are returned for selecting the intended category
 without relying on its display name.
 
-Use `category` on `anylist.add_item` as a hint for a new item:
+Use `category` on `anylist.add_item` to explicitly choose an existing category:
 
 ```yaml
 action: anylist.add_item
@@ -246,10 +247,13 @@ takes priority over a match ID. To disambiguate categories, supply
 `category_set_id`, or use `category_id` instead of `category`. These IDs are
 exact values from `get_categories`.
 
-On add, a known categorization from the selected set's learned rules, existing
-items, or linked favourites takes priority over the hint. Reusing a checked
-item preserves all its category assignments. A blank category hint is ignored;
-an unknown or ambiguous hint logs a warning and still adds the item normally.
+On add, an explicitly supplied category overrides previous categorization from
+learned rules, existing items, or linked favourites. Reusing a checked item
+applies the requested category before unchecking the same item. Assignments in
+other category sets and omitted quantity or notes stay unchanged. If category
+is omitted, the existing automatic categorization and reuse behavior is retained.
+Unknown, blank, or ambiguous selections reject the action before creating,
+changing, or unchecking an item. Adding an item never creates a category.
 
 Use `anylist.update_item` for an explicit category change:
 
@@ -269,6 +273,32 @@ name, photos, barcode, and other item data. Unknown, blank, or ambiguous categor
 selections reject the action before any supplied fields are changed. To move an
 item to a set's default category, select that category explicitly. Omitting both
 category selectors preserves all existing assignments.
+
+### Create Categories
+
+Use `anylist.create_category` to create a custom category. Choose the category
+set explicitly if the list has multiple sets. A list with one set can omit
+`category_set_id`.
+
+```yaml
+action: anylist.create_category
+target:
+  entity_id: todo.anylist_groceries
+data:
+  name: Household supplies
+  category_set_id: category_set_id_from_get_categories
+response_variable: created
+```
+
+The optional response is keyed by the targeted entity and contains `id`, `name`,
+`match_id`, `category_set_id`, and `category_set_name`, read back from AnyList.
+For example, `created['todo.anylist_groceries']['id']` is the new category ID
+for a following add or update action. The category appears at the end of that
+set's category order and in `available_categories` after the immediate refresh.
+
+Blank names and duplicate names within the selected set are rejected, ignoring
+case and extra whitespace. The same name is allowed in different sets. Creating
+a category leaves existing items and the set's default category unchanged.
 
 ## Data Updates
 

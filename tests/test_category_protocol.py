@@ -195,6 +195,31 @@ def test_empty_assignment_is_read_as_explicit_clear():
     assert parsed.category_assignments[0].category_id == ""
 
 
+def test_create_category_uses_native_v2_operation():
+    """Verify category class, field numbers, icon, and append index independently."""
+    client = authenticated_client()
+    requests = []
+    client.post = lambda endpoint, payload: requests.append((endpoint, payload))
+    category = client.create_category("list-a", "north", "  Tools & Gifts  ", 8)
+    assert len(category.id) == 32
+    assert category.match_id == "tools-and-gifts" and category.name == "Tools & Gifts"
+    assert len(requests) == 1 and requests[0][0] == "data/shopping-lists/update-v2"
+    operation = api._parse_fields(
+        api._first_value(api._parse_fields(requests[0][1]), 1)
+    )
+    metadata = api._parse_fields(api._first_value(operation, 1))
+    assert api._first_string(metadata, 2) == "create-category"
+    assert api._first_int(metadata, 4) == 3
+    assert api._first_string(operation, 2) == "list-a"
+    fields = api._parse_fields(api._first_value(operation, 17))
+    assert api._first_string(fields, 1) == category.id
+    assert api._first_string(fields, 3) == "north"
+    assert api._first_string(fields, 4) == "list-a"
+    assert api._first_string(fields, 5) == "Tools & Gifts"
+    assert api._first_string(fields, 6) == "shopping_cart"
+    assert 7 not in fields and api._first_int(fields, 9) == 8
+
+
 def test_new_item_uses_native_assignment_identity():
     """Create an exact-category item using the UUID emitted by the web client."""
     client = authenticated_client()

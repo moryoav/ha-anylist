@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 from typing import Any
 
 from .category import normalize_item_name
@@ -163,62 +162,6 @@ def item_category(
             None,
         )
         return next((value for value in categories if value.id == default_id), None)
-    return None
-
-
-def known_category(
-    shopping_list: Any,
-    name: str,
-    favourites: Iterable[Any],
-    category_set_id: str | None = None,
-) -> Any | None:
-    """Find an unambiguous learned, existing-item, or favourite category.
-
-    Each source retains precedence over the following sources. Category
-    identities include their set, even when two sets use the same match ID.
-    """
-    categories = list_categories(shopping_list, category_set_id)
-    requested = normalize_item_name(name)
-    rules = [
-        value
-        for value in getattr(shopping_list, "category_assignments", [])
-        if normalize_item_name(getattr(value, "item_name", None)) == requested
-        and getattr(value, "list_id", shopping_list.id) in (None, shopping_list.id)
-        and (
-            category_set_id is None
-            or getattr(value, "category_group_id", None) == category_set_id
-        )
-    ]
-    matches = {
-        (category.category_group_id, category.id): category
-        for category in categories
-        for rule in rules
-        if category.id == getattr(rule, "category_id", None)
-        and category.category_group_id == getattr(rule, "category_group_id", None)
-    }
-    if rules:
-        return next(iter(matches.values())) if len(matches) == 1 else None
-    sources = [
-        getattr(shopping_list, "items", []),
-        [
-            item
-            for favourite in favourites
-            if getattr(favourite, "shopping_list_id", None) == shopping_list.id
-            for item in getattr(favourite, "items", [])
-        ],
-    ]
-    set_ids = list(dict.fromkeys(value.category_group_id for value in categories))
-    for items in sources:
-        matches = {}
-        for item in items:
-            if normalize_item_name(getattr(item, "name", None)) != requested:
-                continue
-            for set_id in set_ids:
-                category = item_category(shopping_list, item, set_id, use_default=False)
-                if category is not None:
-                    matches[(category.category_group_id, category.id)] = category
-        if matches:
-            return next(iter(matches.values())) if len(matches) == 1 else None
     return None
 
 

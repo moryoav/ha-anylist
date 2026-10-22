@@ -1,7 +1,6 @@
 """Test category selection and counts across independent category sets."""
 
 from copy import deepcopy
-from types import SimpleNamespace
 
 import pytest
 
@@ -9,7 +8,6 @@ from custom_components.anylist import client as api
 from custom_components.anylist.category_catalog import (
     CategorySelectionError,
     item_category,
-    known_category,
     select_category,
     serialize_categories,
 )
@@ -208,51 +206,6 @@ def test_ambiguous_legacy_category_counts_in_the_sets_default(catalog_list):
         ]
         == 1
     )
-    assert known_category(catalog_list, "Milk", [], "north") is None
-
-
-def test_rules_do_not_merge_identical_aliases_across_sets(catalog_list):
-    """Scope learned rules by set rather than treating every Dairy as identical."""
-    catalog_list.category_assignments = [
-        api.ItemCategoryAssignment("r1", "north", "north-cold", item_name="Milk"),
-        api.ItemCategoryAssignment("r2", "south", "south-cold", item_name="milk"),
-    ]
-    assert known_category(catalog_list, " MILK ", []) is None
-    assert known_category(catalog_list, "milk", [], "south").id == "south-cold"
-    catalog_list.items = [
-        api.ListItem(
-            "one",
-            "list-a",
-            "Milk",
-            category_assignments=[assignment("north", "north-tools")],
-        )
-    ]
-    assert known_category(catalog_list, "milk", [], "north").id == "north-cold"
-
-
-def test_existing_items_and_favourites_preserve_priority(catalog_list):
-    """Use an existing explicit category before a linked favourite's category."""
-    catalog_list.items = [
-        api.ListItem(
-            "one",
-            "list-a",
-            "Paper",
-            category_assignments=[assignment("north", "north-tools")],
-        )
-    ]
-    favourites = [
-        SimpleNamespace(
-            shopping_list_id="list-a",
-            items=[api.ListItem("fav", "list-a", "Paper", category="dairy")],
-        )
-    ]
-    assert (
-        known_category(catalog_list, "paper", favourites, "north").id == "north-tools"
-    )
-    catalog_list.items.clear()
-    assert known_category(catalog_list, "paper", favourites, "north").id == "north-cold"
-    favourites[0].shopping_list_id = "foreign"
-    assert known_category(catalog_list, "paper", favourites, "north") is None
 
 
 def test_foreign_assignment_cannot_override_local_category(catalog_list):
