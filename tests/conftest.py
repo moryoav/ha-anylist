@@ -8,6 +8,8 @@ from typing import Any
 
 import pytest
 
+from custom_components.anylist.client import select_recipe_collection
+
 
 @pytest.fixture(autouse=True)
 def auto_enable_custom_integrations(enable_custom_integrations: None) -> None:
@@ -30,6 +32,7 @@ class FakeRecipe:
     cook_time: int | None = None
     rating: int | None = None
     photo_urls: list[str] = field(default_factory=list)
+    collections: list[Any] = field(default_factory=list)
 
 
 class FakeAnyListClient:
@@ -42,12 +45,14 @@ class FakeAnyListClient:
         lists: list[Any] | None = None,
         favourites: list[Any] | None = None,
         recipes: list[Any] | None = None,
+        collections: list[Any] | None = None,
     ) -> None:
         """Initialize the fake client."""
         self._user_id = user_id
         self.lists = lists if lists is not None else [fake_list()]
         self.favourites = favourites if favourites is not None else []
         self.recipes = recipes if recipes is not None else [fake_recipe()]
+        self.collections = collections if collections is not None else []
         self.calls: list[tuple[str, tuple[Any, ...]]] = []
         # Whether each added item was sent with the "insert at top" position.
         self.added_at_top: list[bool] = []
@@ -84,10 +89,21 @@ class FakeAnyListClient:
             token="redacted",
         )
 
-    def get_recipes(self) -> list[Any]:
+    def get_recipes(self, collection_id=None, collection_name=None) -> list[Any]:
         """Return fake recipes."""
+        if collection_id is not None or collection_name is not None:
+            self.calls.append(("get_recipes", (collection_id, collection_name)))
+            collection = select_recipe_collection(
+                self.collections, collection_id, collection_name
+            )
+            return [value for value in self.recipes if value.id in collection.recipe_ids]
         self.calls.append(("get_recipes", ()))
         return self.recipes
+
+    def get_collections(self) -> list[Any]:
+        """Return fake recipe collections."""
+        self.calls.append(("get_collections", ()))
+        return self.collections
 
     def get_recipe_by_id(self, recipe_id: str) -> Any | None:
         """Return a fake recipe by ID."""

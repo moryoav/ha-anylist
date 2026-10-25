@@ -112,7 +112,9 @@ def test_ingredients_are_opt_in_and_names_only() -> None:
         search_recipes([dinner], "horseardish", include_ingredients=True)["count"] == 1
     )
     assert search_recipes([dinner], "salmon", include_ingredients=True)["count"] == 0
-    assert set(result["recipes"][0]) == {"id", "name", "score", "match_explanation"}
+    assert set(result["recipes"][0]) == {
+        "id", "name", "score", "match_explanation", "collections"
+    }
 
 
 @pytest.mark.parametrize(
