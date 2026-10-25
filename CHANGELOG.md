@@ -11,6 +11,8 @@
 - Add collection ID or unique-name filters to `get_recipes` and `search_recipes`.
 - Add `anylist.add_recipe_to_collection` and `anylist.remove_recipe_from_collection`
   with targeted membership changes and confirmation from a fresh AnyList read.
+- Document collection test helpers and regression cases for selection, membership
+  updates, and failure handling.
 - Document an optional AI Task automation for classifying uncategorized shopping
   list items, including AI Task setup, complete YAML, and testing guidance.
 
