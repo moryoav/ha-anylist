@@ -29,6 +29,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .client import (
     AnyListAuthError,
     AnyListClient,
+    AnyListCollectionError,
     AnyListError,
     AnyListHTTPError,
     AnyListTimeoutError,
@@ -46,6 +47,8 @@ from .const import (
     ATTR_CATEGORY,
     ATTR_CATEGORY_ID,
     ATTR_CATEGORY_SET_ID,
+    ATTR_COLLECTION_ID,
+    ATTR_COLLECTION_NAME,
     ATTR_CONFIG_ENTRY_ID,
     ATTR_IMAGE_URL,
     ATTR_INGREDIENTS,
@@ -73,14 +76,17 @@ from .const import (
     CONF_SELECTED_LISTS,
     DOMAIN,
     SERVICE_ADD_ITEM,
+    SERVICE_ADD_RECIPE_TO_COLLECTION,
     SERVICE_ADD_RECIPE_TO_LIST,
     SERVICE_CREATE_RECIPE,
     SERVICE_CREATE_CATEGORY,
     SERVICE_DELETE_RECIPE,
     SERVICE_GET_CATEGORIES,
+    SERVICE_GET_COLLECTIONS,
     SERVICE_GET_RECIPE,
     SERVICE_GET_RECIPES,
     SERVICE_REFRESH,
+    SERVICE_REMOVE_RECIPE_FROM_COLLECTION,
     SERVICE_SEARCH_RECIPES,
     SERVICE_UPDATE_RECIPE,
     SERVICE_UPDATE_ITEM,
@@ -127,6 +133,12 @@ GET_RECIPES_SERVICE_SCHEMA = vol.Schema(
     {
         vol.Optional(ATTR_CONFIG_ENTRY_ID): cv.string,
         vol.Optional(ATTR_QUERY): cv.string,
+        vol.Exclusive(ATTR_COLLECTION_ID, "collection"): vol.All(
+            cv.string, vol.Length(min=1)
+        ),
+        vol.Exclusive(ATTR_COLLECTION_NAME, "collection"): vol.All(
+            cv.string, vol.Length(min=1)
+        ),
         vol.Optional(ATTR_INCLUDE_INGREDIENTS, default=True): cv.boolean,
         vol.Optional(ATTR_INCLUDE_STEPS, default=False): cv.boolean,
     }
@@ -149,6 +161,12 @@ SEARCH_RECIPES_SERVICE_SCHEMA = vol.Schema(
     {
         vol.Optional(ATTR_CONFIG_ENTRY_ID): cv.string,
         vol.Required(ATTR_QUERY): cv.string,
+        vol.Exclusive(ATTR_COLLECTION_ID, "collection"): vol.All(
+            cv.string, vol.Length(min=1)
+        ),
+        vol.Exclusive(ATTR_COLLECTION_NAME, "collection"): vol.All(
+            cv.string, vol.Length(min=1)
+        ),
         vol.Optional(ATTR_LIMIT, default=DEFAULT_SEARCH_LIMIT): _validate_search_limit,
         vol.Optional(ATTR_INCLUDE_INGREDIENTS, default=False): cv.boolean,
     }
@@ -161,6 +179,21 @@ GET_RECIPE_SERVICE_SCHEMA = vol.Schema(
         vol.Optional(ATTR_NAME): cv.string,
         vol.Optional(ATTR_INCLUDE_INGREDIENTS, default=True): cv.boolean,
         vol.Optional(ATTR_INCLUDE_STEPS, default=True): cv.boolean,
+    }
+)
+
+GET_COLLECTIONS_SERVICE_SCHEMA = REFRESH_SERVICE_SCHEMA
+
+RECIPE_COLLECTION_SERVICE_SCHEMA = vol.Schema(
+    {
+        vol.Optional(ATTR_CONFIG_ENTRY_ID): cv.string,
+        vol.Required(ATTR_RECIPE_ID): vol.All(cv.string, vol.Length(min=1)),
+        vol.Exclusive(ATTR_COLLECTION_ID, "collection"): vol.All(
+            cv.string, vol.Length(min=1)
+        ),
+        vol.Exclusive(ATTR_COLLECTION_NAME, "collection"): vol.All(
+            cv.string, vol.Length(min=1)
+        ),
     }
 )
 
@@ -330,7 +363,38 @@ def _serialize_recipe(
         "cook_time": getattr(recipe, "cook_time", None),
         "rating": getattr(recipe, "rating", None),
         "photo_urls": list(getattr(recipe, "photo_urls", []) or []),
+        "collections": [
+            {"id": value.id, "name": value.name}
+            for value in (getattr(recipe, "collections", []) or [])
+        ],
     }
+
+
+def _serialize_collection(collection: Any) -> dict[str, Any]:
+    """Serialize a collection with its exact recipe IDs."""
+    return {
+        "id": collection.id,
+        "name": collection.name,
+        "recipe_ids": list(collection.recipe_ids),
+    }
+
+
+async def _async_load_recipes(
+    hass: HomeAssistant, client: Any, call: ServiceCall
+) -> list[Any]:
+    """Load recipes with an optional collection filter from the same snapshot."""
+    try:
+        return await async_call_with_timeout(
+            hass,
+            client.get_recipes,
+            call.data.get(ATTR_COLLECTION_ID),
+            call.data.get(ATTR_COLLECTION_NAME),
+            timeout=ANYLIST_REQUEST_TIMEOUT,
+        )
+    except AnyListCollectionError as err:
+        raise _translated_error(err.reason) from err
+    except Exception as err:
+        raise _translated_error("recipes_load_failed", error=err) from err
 
 
 def _build_ingredients(ingredients_data: list[dict[str, Any]]) -> list[Any]:
@@ -597,14 +661,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
         include_steps = call.data[ATTR_INCLUDE_STEPS]
         query = call.data.get(ATTR_QUERY)
 
-        try:
-            recipes = await async_call_with_timeout(
-                hass,
-                client.get_recipes,
-                timeout=ANYLIST_REQUEST_TIMEOUT,
-            )
-        except Exception as err:
-            raise _translated_error("recipes_load_failed", error=err) from err
+        recipes = await _async_load_recipes(hass, client, call)
 
         if query:
             query_lower = query.lower()
@@ -633,14 +690,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
         _, entry_data = _get_entry_runtime_data(
             hass, call.data.get(ATTR_CONFIG_ENTRY_ID)
         )
-        try:
-            recipes = await async_call_with_timeout(
-                hass,
-                entry_data.client.get_recipes,
-                timeout=ANYLIST_REQUEST_TIMEOUT,
-            )
-        except Exception as err:
-            raise _translated_error("recipes_load_failed", error=err) from err
+        recipes = await _async_load_recipes(hass, entry_data.client, call)
 
         return await hass.async_add_executor_job(
             lambda: search_recipes(
@@ -673,6 +723,53 @@ def _async_register_services(hass: HomeAssistant) -> None:
                 include_steps=call.data[ATTR_INCLUDE_STEPS],
             )
         }
+
+    async def async_handle_get_collections(call: ServiceCall) -> ServiceResponse:
+        """Return user collections with their recipe IDs, including empty ones."""
+        _, entry_data = _get_entry_runtime_data(
+            hass, call.data.get(ATTR_CONFIG_ENTRY_ID)
+        )
+        try:
+            collections = await async_call_with_timeout(
+                hass, entry_data.client.get_collections, timeout=ANYLIST_REQUEST_TIMEOUT
+            )
+        except Exception as err:
+            raise _translated_error("collections_load_failed", error=err) from err
+        return {"collections": [_serialize_collection(value) for value in collections]}
+
+    async def async_handle_recipe_collection(call: ServiceCall) -> ServiceResponse | None:
+        """Add or remove one membership and return the confirmed collection."""
+        _validate_exactly_one(
+            call.data.get(ATTR_COLLECTION_ID),
+            call.data.get(ATTR_COLLECTION_NAME),
+            first_label=ATTR_COLLECTION_ID,
+            second_label=ATTR_COLLECTION_NAME,
+        )
+        _, entry_data = _get_entry_runtime_data(
+            hass, call.data.get(ATTR_CONFIG_ENTRY_ID)
+        )
+        client = entry_data.client
+        change = (
+            client.add_recipe_to_collection
+            if call.service == SERVICE_ADD_RECIPE_TO_COLLECTION
+            else client.remove_recipe_from_collection
+        )
+        try:
+            collection = await async_call_with_timeout(
+                hass,
+                change,
+                call.data[ATTR_RECIPE_ID],
+                call.data.get(ATTR_COLLECTION_ID),
+                call.data.get(ATTR_COLLECTION_NAME),
+                timeout=ANYLIST_REFRESH_TIMEOUT,
+            )
+        except AnyListCollectionError as err:
+            raise _translated_error(err.reason) from err
+        except Exception as err:
+            raise _translated_error("collection_update_failed", error=err) from err
+        if not call.return_response:
+            return None
+        return {"collection": _serialize_collection(collection)}
 
     async def async_handle_add_recipe_to_list(
         call: ServiceCall,
@@ -916,6 +1013,24 @@ def _async_register_services(hass: HomeAssistant) -> None:
         schema=GET_RECIPE_SERVICE_SCHEMA,
         supports_response=SupportsResponse.ONLY,
     )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_GET_COLLECTIONS,
+        async_handle_get_collections,
+        schema=GET_COLLECTIONS_SERVICE_SCHEMA,
+        supports_response=SupportsResponse.ONLY,
+    )
+    for service in (
+        SERVICE_ADD_RECIPE_TO_COLLECTION,
+        SERVICE_REMOVE_RECIPE_FROM_COLLECTION,
+    ):
+        hass.services.async_register(
+            DOMAIN,
+            service,
+            async_handle_recipe_collection,
+            schema=RECIPE_COLLECTION_SERVICE_SCHEMA,
+            supports_response=SupportsResponse.OPTIONAL,
+        )
     hass.services.async_register(
         DOMAIN,
         SERVICE_ADD_RECIPE_TO_LIST,

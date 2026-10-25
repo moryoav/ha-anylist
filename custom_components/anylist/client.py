@@ -74,6 +74,15 @@ class AnyListNotFoundError(AnyListError):
     """Raised when a requested AnyList object is not found."""
 
 
+class AnyListCollectionError(AnyListError):
+    """A collection selection or membership update could not be confirmed."""
+
+    def __init__(self, reason: str) -> None:
+        """Keep a translation key without including private collection names."""
+        super().__init__(reason)
+        self.reason = reason
+
+
 @dataclass(slots=True)
 class ListCategory:
     """An AnyList category for a shopping list."""
@@ -189,6 +198,43 @@ class Ingredient:
 
 
 @dataclass(slots=True)
+class RecipeCollection:
+    """An AnyList recipe collection, including empty collections."""
+
+    id: str
+    name: str
+    recipe_ids: list[str] = field(default_factory=list)
+
+
+def select_recipe_collection(
+    collections: list[RecipeCollection],
+    collection_id: str | None = None,
+    collection_name: str | None = None,
+) -> RecipeCollection:
+    """Resolve an exact ID or a unique name, ignoring name case and spacing."""
+    if (collection_id is None) == (collection_name is None):
+        raise AnyListCollectionError("collection_selector_required")
+    if collection_id is not None:
+        matches = [value for value in collections if value.id == collection_id]
+    else:
+        name = " ".join(
+            unicodedata.normalize("NFKC", collection_name or "").split()
+        ).casefold()
+        matches = [
+            value
+            for value in collections
+            if name
+            and " ".join(unicodedata.normalize("NFKC", value.name).split()).casefold()
+            == name
+        ]
+    if not matches:
+        raise AnyListCollectionError("collection_not_found")
+    if len(matches) > 1:
+        raise AnyListCollectionError("collection_ambiguous")
+    return matches[0]
+
+
+@dataclass(slots=True)
 class Recipe:
     """A recipe."""
 
@@ -204,6 +250,7 @@ class Recipe:
     cook_time: int | None = None
     rating: int | None = None
     photo_urls: list[str] = field(default_factory=list)
+    collections: list[RecipeCollection] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -798,13 +845,71 @@ def _parse_recipe(data: bytes) -> Recipe | None:
 def _parse_recipes_response(data: bytes) -> list[Recipe]:
     """Parse a PBRecipeDataResponse."""
     fields = _parse_fields(data)
-    return [
+    recipes = [
         recipe
         for raw_recipe in _all_values(fields, 3)
         if isinstance(raw_recipe, bytes)
         for recipe in [_parse_recipe(raw_recipe)]
         if recipe is not None
     ]
+    memberships: dict[str, list[RecipeCollection]] = {}
+    for collection in _parse_recipe_collections(fields):
+        for recipe_id in dict.fromkeys(collection.recipe_ids):
+            memberships.setdefault(recipe_id, []).append(collection)
+    for recipe in recipes:
+        recipe.collections = memberships.get(recipe.id, [])
+    return recipes
+
+
+def _parse_recipe_collections(
+    fields: dict[int, list[tuple[int, Any]]],
+) -> list[RecipeCollection]:
+    """Read user collections in app order, excluding the system All Recipes view.
+
+    PBRecipeDataResponse.recipeCollections is field 5; field 4 orders them.
+    PBRecipeCollection stores identifier/name/recipeIds in fields 1/3/4.
+    Verified against AnyList's web client on 2026-10-25:
+    https://www.anylist.com/static/webapp/js/app.min.js
+    """
+    collections = {}
+    for raw in _all_values(fields, 5):
+        if not isinstance(raw, bytes):
+            continue
+        values = _parse_fields(raw)
+        identifier = _first_string(values, 1)
+        if identifier:
+            collections[identifier] = RecipeCollection(
+                id=identifier,
+                name=_first_string(values, 3) or "",
+                recipe_ids=[
+                    value.decode("utf-8", errors="replace")
+                    for value in _all_values(values, 4)
+                    if isinstance(value, bytes)
+                ],
+            )
+    ordered_ids = dict.fromkeys(
+        value.decode("utf-8", errors="replace")
+        for value in _all_values(fields, 4)
+        if isinstance(value, bytes)
+    )
+    ordered_ids.update(dict.fromkeys(collections))
+    return [collections[key] for key in ordered_ids if key in collections]
+
+
+def _preserve_message_fields(data: bytes, replaced_fields: set[int]) -> bytes:
+    """Copy known and future protobuf fields outside a targeted update."""
+    payload = []
+    for number, values in _parse_fields(data).items():
+        if number in replaced_fields:
+            continue
+        for wire_type, value in values:
+            if wire_type == 2:
+                payload.append(_field_bytes(number, value))
+            elif wire_type == 0:
+                payload.append(_field_key(number, wire_type) + _encode_varint(value))
+            else:
+                payload.append(_field_key(number, wire_type) + value)
+    return b"".join(payload)
 
 
 def _pb_operation_metadata(
@@ -1040,12 +1145,14 @@ def _pb_recipe_operation(
     recipe: bytes | None = None,
     recipe_ids: list[str] | None = None,
     recipe_data_id: str | None = None,
+    recipe_collection: bytes | None = None,
 ) -> bytes:
     """Build PBRecipeOperation."""
     payload = [
         _field_message(1, _pb_operation_metadata(_generate_id(), handler_id, user_id)),
         _field_string(2, recipe_data_id),
         _field_message(3, recipe),
+        _field_message(4, recipe_collection),
         _field_bool(8, False),
     ]
     for recipe_id in recipe_ids or []:
@@ -1236,14 +1343,98 @@ class AnyListClient:
             return []
         return _parse_favourites_lists_response(raw_response)
 
-    def get_recipes(self) -> list[Recipe]:
-        """Get all recipes."""
+    def get_recipes(
+        self,
+        collection_id: str | None = None,
+        collection_name: str | None = None,
+    ) -> list[Recipe]:
+        """Get recipes and memberships from one snapshot, optionally by collection."""
         data = self.get_user_data()
         fields = _parse_fields(data)
         raw_response = _first_value(fields, 3)
         if not isinstance(raw_response, bytes):
-            return []
-        return _parse_recipes_response(raw_response)
+            raw_response = b""
+        recipe_fields = _parse_fields(raw_response)
+        recipes = _parse_recipes_response(raw_response)
+        if collection_id is not None or collection_name is not None:
+            collection = select_recipe_collection(
+                _parse_recipe_collections(recipe_fields), collection_id, collection_name
+            )
+            recipe_ids = set(collection.recipe_ids)
+            recipes = [recipe for recipe in recipes if recipe.id in recipe_ids]
+        return recipes
+
+    def get_collections(self) -> list[RecipeCollection]:
+        """Get all user recipe collections, including empty ones."""
+        return _parse_recipe_collections(self._get_recipe_data_fields())
+
+    def add_recipe_to_collection(
+        self,
+        recipe_id: str,
+        collection_id: str | None = None,
+        collection_name: str | None = None,
+    ) -> RecipeCollection:
+        """Add a recipe to a collection and confirm the saved membership."""
+        return self._change_recipe_collection_membership(
+            recipe_id, collection_id, collection_name, add=True
+        )
+
+    def remove_recipe_from_collection(
+        self,
+        recipe_id: str,
+        collection_id: str | None = None,
+        collection_name: str | None = None,
+    ) -> RecipeCollection:
+        """Remove a collection membership while retaining the recipe."""
+        return self._change_recipe_collection_membership(
+            recipe_id, collection_id, collection_name, add=False
+        )
+
+    def _change_recipe_collection_membership(
+        self,
+        recipe_id: str,
+        collection_id: str | None,
+        collection_name: str | None,
+        *,
+        add: bool,
+    ) -> RecipeCollection:
+        """Send the web client's membership delta, preserving collection metadata."""
+        fields = self._get_recipe_data_fields()
+        collection = select_recipe_collection(
+            _parse_recipe_collections(fields), collection_id, collection_name
+        )
+        self._find_raw_recipe(fields, recipe_id)
+        if (recipe_id in collection.recipe_ids) == add:
+            return collection
+        raw_collection = next(
+            raw
+            for raw in _all_values(fields, 5)
+            if isinstance(raw, bytes)
+            and _first_string(_parse_fields(raw), 1) == collection.id
+        )
+        # The operation contains only the changed IDs, not the full membership.
+        payload = _preserve_message_fields(raw_collection, {4}) + _field_string(
+            4, recipe_id
+        )
+        operation = _pb_recipe_operation(
+            handler_id=(
+                "add-recipes-to-collection" if add else "remove-recipes-from-collection"
+            ),
+            user_id=self._user_id,
+            recipe_data_id=self._recipe_data_id(fields),
+            recipe_collection=payload,
+        )
+        self.post("data/user-recipe-data/update", _pb_recipe_operation_list([operation]))
+        try:
+            collections = self.get_collections()
+        except AnyListError as err:
+            raise AnyListCollectionError("collection_update_unconfirmed") from err
+        saved = next(
+            (value for value in collections if value.id == collection.id), None
+        )
+        if saved is None or (recipe_id in saved.recipe_ids) != add:
+            raise AnyListCollectionError("collection_update_unconfirmed")
+        return saved
 
     def get_recipe_by_id(self, recipe_id: str) -> Recipe:
         """Get a recipe by ID."""
@@ -1786,17 +1977,7 @@ class AnyListClient:
         replaced_fields = {2, 3, 8, 9}
         if photo_id is not None:
             replaced_fields.update({11, 13})
-        payload = []
-        for number, values in _parse_fields(raw_recipe).items():
-            if number in replaced_fields:
-                continue
-            for wire_type, value in values:
-                if wire_type == 2:
-                    payload.append(_field_bytes(number, value))
-                elif wire_type == 0:
-                    payload.append(_field_key(number, wire_type) + _encode_varint(value))
-                else:
-                    payload.append(_field_key(number, wire_type) + value)
+        payload = [_preserve_message_fields(raw_recipe, replaced_fields)]
         payload.extend((_field_double(2, _current_timestamp()), _field_string(3, name)))
         payload.extend(_field_message(8, _pb_ingredient(item)) for item in ingredients)
         payload.extend(_field_string(9, step) for step in preparation_steps)

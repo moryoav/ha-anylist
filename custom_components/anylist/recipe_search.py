@@ -139,6 +139,10 @@ def search_recipes(
                 "name": recipe.name,
                 "score": score,
                 "match_explanation": explanation,
+                "collections": [
+                    {"id": value.id, "name": value.name}
+                    for value in (getattr(recipe, "collections", []) or [])
+                ],
             }
         )
 

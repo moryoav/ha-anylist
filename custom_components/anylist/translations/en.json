@@ -198,12 +198,30 @@
     },
     "category_creation_unconfirmed": {
       "message": "The new category could not be confirmed after refreshing AnyList. Check get_categories before trying again."
+    },
+    "collection_selector_required": {
+      "message": "Provide exactly one of collection_id or collection_name."
+    },
+    "collection_not_found": {
+      "message": "The recipe collection was not found. Use a current name or ID from get_collections."
+    },
+    "collection_ambiguous": {
+      "message": "More than one recipe collection matches this name. Use an exact ID from get_collections."
+    },
+    "collections_load_failed": {
+      "message": "Failed to load AnyList recipe collections: {error}"
+    },
+    "collection_update_failed": {
+      "message": "Failed to update the AnyList recipe collection: {error}"
+    },
+    "collection_update_unconfirmed": {
+      "message": "The collection membership could not be confirmed after refreshing AnyList. Check get_collections before trying again."
     }
   },
   "services": {
     "search_recipes": {
       "name": "Search recipes",
-      "description": "Find compact recipe candidates by words in any order, with minor typo tolerance. Returns recipes (id, name, score, match_explanation), count and has_more. Scores rank relevance, not confidence. Use conversation context to select a candidate, clarify ambiguous matches before editing, then call get_recipe with its exact ID for full details.",
+      "description": "Find compact recipe candidates by words in any order, with minor typo tolerance. Returns recipes (id, name, score, match_explanation, collections), count and has_more. Scores rank relevance, not confidence. Use conversation context to select a candidate, clarify ambiguous matches before editing, then call get_recipe with its exact ID for full details.",
       "fields": {
         "config_entry_id": {
           "name": "Config entry ID",
@@ -220,12 +238,20 @@
         "include_ingredients": {
           "name": "Search ingredient names",
           "description": "Also match ingredient names, with less weight than titles. Ingredients and preparation steps are never included in search results."
+        },
+        "collection_id": {
+          "name": "Collection ID",
+          "description": "Exact collection ID from get_collections. Provide either collection_id or collection_name."
+        },
+        "collection_name": {
+          "name": "Collection name",
+          "description": "Collection name, ignoring case and extra whitespace. Must match one collection. Provide either collection_name or collection_id."
         }
       }
     },
     "get_recipes": {
       "name": "Get recipes",
-      "description": "Return AnyList recipes with an optional case-insensitive substring filter. For ranked word and typo matching, use search_recipes, then get_recipe with a selected ID.",
+      "description": "Return AnyList recipes with collection memberships and optional name substring and collection filters. For ranked word and typo matching, use search_recipes, then get_recipe with a selected ID.",
       "fields": {
         "config_entry_id": {
           "name": "Config entry ID",
@@ -242,12 +268,20 @@
         "include_steps": {
           "name": "Include preparation steps",
           "description": "Include preparation steps in each returned recipe."
+        },
+        "collection_id": {
+          "name": "Collection ID",
+          "description": "Exact collection ID from get_collections. Provide either collection_id or collection_name."
+        },
+        "collection_name": {
+          "name": "Collection name",
+          "description": "Collection name, ignoring case and extra whitespace. Must match one collection. Provide either collection_name or collection_id."
         }
       }
     },
     "get_recipe": {
       "name": "Get recipe",
-      "description": "Return a single AnyList recipe by ID or exact name. After search_recipes, pass the selected candidate's exact ID as recipe_id to retrieve full details. Clarify ambiguous matches before editing.",
+      "description": "Return a single AnyList recipe with its collection memberships by ID or exact name. After search_recipes, pass the selected candidate's exact ID as recipe_id to retrieve full details. Clarify ambiguous matches before editing.",
       "fields": {
         "config_entry_id": {
           "name": "Config entry ID",
@@ -356,6 +390,60 @@
         "category_set_id": {
           "name": "Category set ID",
           "description": "Exact set ID from get_categories. Required when the list has multiple sets; otherwise the only set is used."
+        }
+      }
+    },
+    "get_collections": {
+      "name": "Get recipe collections",
+      "description": "Return all user recipe collections, including empty ones, with id, name and recipe_ids. The system All Recipes view is excluded.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Config entry ID",
+          "description": "Specific AnyList config entry to use when multiple AnyList accounts are configured."
+        }
+      }
+    },
+    "add_recipe_to_collection": {
+      "name": "Add recipe to collection",
+      "description": "Add an existing recipe to a collection and confirm the saved membership. Other memberships and recipe content are preserved. An already satisfied membership makes no change.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Config entry ID",
+          "description": "Specific AnyList config entry to use when multiple AnyList accounts are configured."
+        },
+        "recipe_id": {
+          "name": "Recipe ID",
+          "description": "Exact recipe ID returned by the recipe actions."
+        },
+        "collection_id": {
+          "name": "Collection ID",
+          "description": "Exact collection ID from get_collections. Provide either collection_id or collection_name."
+        },
+        "collection_name": {
+          "name": "Collection name",
+          "description": "Collection name, ignoring case and extra whitespace. Must match one collection. Provide either collection_name or collection_id."
+        }
+      }
+    },
+    "remove_recipe_from_collection": {
+      "name": "Remove recipe from collection",
+      "description": "Remove an existing recipe from a collection and confirm the saved membership. Other memberships and recipe content are preserved. An already satisfied membership makes no change.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Config entry ID",
+          "description": "Specific AnyList config entry to use when multiple AnyList accounts are configured."
+        },
+        "recipe_id": {
+          "name": "Recipe ID",
+          "description": "Exact recipe ID returned by the recipe actions."
+        },
+        "collection_id": {
+          "name": "Collection ID",
+          "description": "Exact collection ID from get_collections. Provide either collection_id or collection_name."
+        },
+        "collection_name": {
+          "name": "Collection name",
+          "description": "Collection name, ignoring case and extra whitespace. Must match one collection. Provide either collection_name or collection_id."
         }
       }
     }

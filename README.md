@@ -134,6 +134,9 @@ Shopping list and recipe actions are available for automations, scripts, and Nod
 - `anylist.get_recipes`
 - `anylist.search_recipes`
 - `anylist.get_recipe`
+- `anylist.get_collections`
+- `anylist.add_recipe_to_collection`
+- `anylist.remove_recipe_from_collection`
 - `anylist.add_recipe_to_list`
 - `anylist.create_recipe`
 - `anylist.update_recipe`
@@ -433,6 +436,9 @@ recipes:
     name: Pink Horseradish & Dill Salmon
     score: 90.0
     match_explanation: All query words in title
+    collections:
+      - id: collection_123
+        name: Weeknight dinners
 count: 1
 has_more: false
 ```
@@ -473,6 +479,94 @@ data:
   include_steps: false
 response_variable: anylist_recipes
 ```
+
+### Find and manage recipe collections
+
+`get_recipe`, `get_recipes`, and `search_recipes` include a `collections` array
+on every returned recipe. Each entry contains the collection's exact `id` and
+`name`. Recipes can belong to multiple collections, and recipes outside all
+collections return an empty array. Search results remain compact and do not
+include ingredients or preparation steps.
+
+List all user collections, including empty ones, and their recipe IDs:
+
+```yaml
+action: anylist.get_collections
+response_variable: recipe_collections
+```
+
+The response has this shape (IDs are illustrative):
+
+```yaml
+collections:
+  - id: cocktails_123
+    name: Cocktails
+    recipe_ids:
+      - recipe_123
+      - recipe_456
+  - id: holiday_123
+    name: Thanksgiving
+    recipe_ids: []
+```
+
+The system **All Recipes** view is excluded. Collections retain their order in
+AnyList. No recipe names or ingredients are used to infer membership.
+
+Both `get_recipes` and `search_recipes` accept an optional `collection_id` or
+`collection_name`. IDs match exactly. Names ignore case, Unicode width differences,
+and extra whitespace, but must identify one collection. A missing or ambiguous
+collection reports an error; use an ID from `get_collections` to disambiguate.
+Omit both fields to search or list recipes across all collections.
+
+List everything in a collection without a text query:
+
+```yaml
+action: anylist.get_recipes
+data:
+  collection_name: Cocktails
+  include_ingredients: false
+response_variable: cocktails
+```
+
+Search within a collection:
+
+```yaml
+action: anylist.search_recipes
+data:
+  query: martini
+  collection_name: Cocktails
+  limit: 15
+response_variable: cocktail_candidates
+```
+
+`search_recipes` still requires a text query. Collection filtering happens before
+matching, ranking, and limiting, so other collections cannot crowd out candidates.
+Use `get_recipes` to list an entire collection. A known empty collection returns
+an empty recipe array.
+
+Add an existing recipe to a collection:
+
+```yaml
+action: anylist.add_recipe_to_collection
+data:
+  recipe_id: recipe_123
+  collection_id: cocktails_123
+response_variable: updated_collection
+```
+
+Use `anylist.remove_recipe_from_collection` with the same fields to remove that
+membership. Both actions require an exact recipe ID and accept either a collection
+ID or a unique collection name. They preserve the recipe, other memberships, and
+collection settings. An already satisfied membership makes no change. After a
+change, the action reads AnyList again to confirm the membership before returning
+the updated `collection` with `id`, `name`, and `recipe_ids`. If confirmation fails,
+check `get_collections` before retrying.
+
+All these actions accept `config_entry_id` when multiple accounts are configured.
+Collection membership actions organize existing recipes. Use `create_recipe` to
+create a recipe, or `add_recipe_to_list` to add its ingredients to a shopping list.
+Recipe tags are not exposed by the AnyList web-client protocol inspected for this
+feature, so tag fields and filters are unavailable.
 
 ## Known Limitations
 
