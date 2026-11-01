@@ -7,7 +7,7 @@ the wire format used by anylist_rs.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import json
 import logging
 import re
@@ -189,12 +189,19 @@ class FavouritesList:
 
 @dataclass(slots=True)
 class Ingredient:
-    """A recipe ingredient."""
+    """A recipe ingredient, or a heading that groups the ingredients after it.
+
+    AnyList keeps headings in the same ordered list as ingredients and marks
+    them with ``is_heading``. A heading uses only ``name`` and ``id``. ``id``
+    is AnyList's identifier for the entry, or None when none is stored.
+    """
 
     name: str
     quantity: str | None = None
     note: str | None = None
     raw_ingredient: str | None = None
+    is_heading: bool = False
+    id: str | None = None
 
 
 @dataclass(slots=True)
@@ -780,7 +787,14 @@ def _parse_favourites_lists_response(data: bytes) -> list[FavouritesList]:
 
 
 def _parse_ingredient(data: bytes) -> Ingredient | None:
-    """Parse a PBIngredient."""
+    """Parse a PBIngredient, which is either an ingredient or a heading.
+
+    PBIngredient stores rawIngredient, name, quantity and note in fields 1-4,
+    the identifier in field 6 and isHeading in field 7. Headings stay in the
+    recipe's ingredient order. Entries without a name are skipped.
+    Verified against AnyList's web client on 2026-11-01:
+    https://www.anylist.com/static/webapp/js/app.min.js
+    """
     fields = _parse_fields(data)
     name = _first_string(fields, 2)
     if not name:
@@ -791,6 +805,8 @@ def _parse_ingredient(data: bytes) -> Ingredient | None:
         quantity=_first_string(fields, 3),
         note=_first_string(fields, 4),
         raw_ingredient=_first_string(fields, 1),
+        is_heading=_first_bool(fields, 7),
+        id=_first_string(fields, 6) or None,
     )
 
 
@@ -1100,15 +1116,38 @@ def _pb_shopping_list_with_items(list_id: str, items: list[ListItem], user_id: s
 
 
 def _pb_ingredient(ingredient: Ingredient) -> bytes:
-    """Build PBIngredient."""
+    """Build PBIngredient with its identifier, marking headings with isHeading.
+
+    Like the AnyList apps, isHeading (field 7) is written only for headings.
+    """
     return b"".join(
         (
             _field_string(1, ingredient.raw_ingredient),
             _field_string(2, ingredient.name),
             _field_string(3, ingredient.quantity),
             _field_string(4, ingredient.note),
+            _field_string(6, ingredient.id),
+            _field_bool(7, True if ingredient.is_heading else None),
         )
     )
+
+
+def _with_unique_ingredient_ids(ingredients: list[Ingredient]) -> list[Ingredient]:
+    """Return copies of the ingredients in which every ID is unique.
+
+    The AnyList apps give each ingredient and heading an identifier and use it
+    to find the entry while editing a recipe. Keep each supplied ID the first
+    time it appears; give missing and repeated IDs a new one.
+    """
+    used_ids: set[str] = set()
+    result: list[Ingredient] = []
+    for ingredient in ingredients:
+        identifier = ingredient.id
+        if not identifier or identifier in used_ids:
+            identifier = _generate_id()
+        used_ids.add(identifier)
+        result.append(replace(ingredient, id=identifier))
+    return result
 
 
 def _pb_recipe(
@@ -1872,8 +1911,12 @@ class AnyListClient:
         preparation_steps: list[str],
         photo_id: str | None = None,
     ) -> Recipe:
-        """Create a recipe."""
+        """Create a recipe, giving each ingredient and heading a unique ID.
+
+        The returned recipe holds the ingredients exactly as saved.
+        """
         recipe_id = _generate_id()
+        ingredients = _with_unique_ingredient_ids(ingredients)
         recipe_payload = _pb_recipe(
             recipe_id=recipe_id,
             name=name,
@@ -1969,7 +2012,11 @@ class AnyListClient:
         preparation_steps: list[str],
         photo_id: str | None = None,
     ) -> None:
-        """Update recipe content, preserving photos unless a new one is supplied."""
+        """Update recipe content, preserving photos unless a new one is supplied.
+
+        ``ingredients`` replaces the whole ingredient list, headings included.
+        Supplied ingredient IDs are kept; missing or repeated IDs get new ones.
+        """
         fields = self._get_recipe_data_fields()
         raw_recipe = self._find_raw_recipe(fields, recipe_id)
         # The web app edits a copy of the original PBRecipe. Preserve fields
@@ -1979,7 +2026,10 @@ class AnyListClient:
             replaced_fields.update({11, 13})
         payload = [_preserve_message_fields(raw_recipe, replaced_fields)]
         payload.extend((_field_double(2, _current_timestamp()), _field_string(3, name)))
-        payload.extend(_field_message(8, _pb_ingredient(item)) for item in ingredients)
+        payload.extend(
+            _field_message(8, _pb_ingredient(item))
+            for item in _with_unique_ingredient_ids(ingredients)
+        )
         payload.extend(_field_string(9, step) for step in preparation_steps)
         if photo_id is not None:
             payload.append(_field_string(11, photo_id))
@@ -2027,14 +2077,17 @@ class AnyListClient:
         list_id: str,
         scale_factor: float | None = None,
     ) -> None:
-        """Add a recipe's ingredients to a shopping list."""
+        """Add a recipe's ingredients to a shopping list, skipping headings."""
         recipe = self.get_recipe_by_id(recipe_id)
         at_top = any(
             shopping_list.id == list_id and inserts_new_items_at_top(shopping_list)
             for shopping_list in self.get_lists()
         )
-        # Like the apps, add in reverse at the top to keep the recipe's order.
-        ingredients = reversed(recipe.ingredients) if at_top else recipe.ingredients
+        # Like the apps, skip headings and add in reverse at the top to keep
+        # the recipe's order.
+        ingredients = [item for item in recipe.ingredients if not item.is_heading]
+        if at_top:
+            ingredients.reverse()
         for ingredient in ingredients:
             quantity = ingredient.quantity
             if quantity is not None and scale_factor is not None:

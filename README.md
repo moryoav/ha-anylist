@@ -389,10 +389,78 @@ response_variable: updated_recipe
 
 Provide either `recipe_id` or the exact current `recipe_name`. The action still
 requires the complete replacement `name`, `ingredients`, and `preparation_steps`.
+To keep the recipe's ingredient headings and AnyList IDs, pass back the
+`ingredients` returned by `get_recipe` unchanged; see
+[Ingredient headings](#ingredient-headings).
 Omitting `image_url` keeps the existing image. Providing it adds an image to a
 recipe without one, or replaces its existing image. Other metadata, including
 notes, source, rating, and creation date, is preserved. If importing the image
 fails, the recipe is not updated.
+
+### Ingredient headings
+
+AnyList recipes can group ingredients under headings, such as **For the sauce**.
+Recipe responses keep headings in place in `ingredients`, in the order the
+AnyList apps show them. Every entry includes `is_heading` and AnyList's `id`
+for the entry, which is `null` if AnyList stored none (IDs below are
+illustrative):
+
+```yaml
+ingredients:
+  - name: For the sauce
+    quantity: null
+    note: null
+    raw_ingredient: null
+    is_heading: true
+    id: heading_123
+  - name: Tomatoes
+    quantity: 500 g
+    note: null
+    raw_ingredient: 500 g tomatoes
+    is_heading: false
+    id: ingredient_123
+```
+
+To use only the ingredients in a template, filter out the headings. For a
+`get_recipe` response stored in `selected_recipe`:
+
+```jinja
+{{ selected_recipe.recipe.ingredients | rejectattr('is_heading') | map(attribute='name') | list }}
+```
+
+`create_recipe` and `update_recipe` accept the same entries. Set
+`is_heading: true` to add a heading; it groups the ingredients that follow it.
+A heading takes only a `name` and, optionally, an `id`. A heading with a
+`quantity`, `note`, or `raw_ingredient` is rejected.
+
+```yaml
+action: anylist.create_recipe
+data:
+  name: Pasta al Pomodoro
+  ingredients:
+    - name: For the sauce
+      is_heading: true
+    - name: Tomatoes
+      quantity: 500 g
+    - name: Garlic
+      quantity: 2 cloves
+      note: minced
+    - name: Topping
+      is_heading: true
+    - name: Basil
+  preparation_steps:
+    - Simmer the tomatoes and garlic.
+    - Top with basil.
+```
+
+`update_recipe` replaces the whole list, so include every heading to keep.
+Passing back the `ingredients` from `get_recipe` keeps each entry's heading
+flag and AnyList ID. Entries without an `id` get a new one, as in the AnyList
+apps. If the same `id` appears more than once, the later entries get new IDs.
+
+`add_recipe_to_list` adds only ingredients, never headings, like the AnyList
+apps. `search_recipes` with `include_ingredients` matches ingredient names, not
+heading text.
 
 ### Search recipes, then read the selected recipe
 

@@ -50,11 +50,13 @@ from .const import (
     ATTR_COLLECTION_ID,
     ATTR_COLLECTION_NAME,
     ATTR_CONFIG_ENTRY_ID,
+    ATTR_ID,
     ATTR_IMAGE_URL,
     ATTR_INGREDIENTS,
     ATTR_INCLUDE_INGREDIENTS,
     ATTR_INCLUDE_COUNTS,
     ATTR_INCLUDE_STEPS,
+    ATTR_IS_HEADING,
     ATTR_ITEM,
     ATTR_LIMIT,
     ATTR_LIST_ID,
@@ -114,13 +116,37 @@ class AnyListRuntimeData:
     icalendar_url: str | None
 
 
-INGREDIENT_INPUT_SCHEMA = vol.Schema(
-    {
-        vol.Required(ATTR_NAME): cv.string,
-        vol.Optional(ATTR_QUANTITY): vol.Any(None, cv.string),
-        vol.Optional(ATTR_NOTE): vol.Any(None, cv.string),
-        vol.Optional(ATTR_RAW_INGREDIENT): vol.Any(None, cv.string),
-    }
+_INGREDIENT_ONLY_FIELDS = (ATTR_QUANTITY, ATTR_NOTE, ATTR_RAW_INGREDIENT)
+
+
+def _validate_heading_fields(value: dict[str, Any]) -> dict[str, Any]:
+    """Reject ingredient-only fields on a heading instead of saving them unseen.
+
+    AnyList shows only a heading's name, so a quantity, note, or raw
+    ingredient on a heading is almost certainly a mistake.
+    """
+    if value[ATTR_IS_HEADING] and any(
+        _value_is_set(value.get(key)) for key in _INGREDIENT_ONLY_FIELDS
+    ):
+        raise vol.Invalid(
+            "A heading supports only name and id; remove quantity, note, and "
+            "raw_ingredient"
+        )
+    return value
+
+
+INGREDIENT_INPUT_SCHEMA = vol.All(
+    vol.Schema(
+        {
+            vol.Required(ATTR_NAME): cv.string,
+            vol.Optional(ATTR_QUANTITY): vol.Any(None, cv.string),
+            vol.Optional(ATTR_NOTE): vol.Any(None, cv.string),
+            vol.Optional(ATTR_RAW_INGREDIENT): vol.Any(None, cv.string),
+            vol.Optional(ATTR_IS_HEADING, default=False): cv.boolean,
+            vol.Optional(ATTR_ID): vol.Any(None, cv.string),
+        }
+    ),
+    _validate_heading_fields,
 )
 
 REFRESH_SERVICE_SCHEMA = vol.Schema(
@@ -323,12 +349,19 @@ def _normalize_optional_string(value: Any) -> str | None:
 
 
 def _serialize_ingredient(ingredient: Any) -> dict[str, Any]:
-    """Serialize an AnyList ingredient."""
+    """Serialize an AnyList ingredient or heading.
+
+    The keys match the create_recipe and update_recipe ingredient input, so
+    a recipe's ingredients can be passed back unchanged, headings and IDs
+    included.
+    """
     return {
         ATTR_NAME: getattr(ingredient, ATTR_NAME, None),
         ATTR_QUANTITY: getattr(ingredient, ATTR_QUANTITY, None),
         ATTR_NOTE: getattr(ingredient, ATTR_NOTE, None),
         ATTR_RAW_INGREDIENT: getattr(ingredient, ATTR_RAW_INGREDIENT, None),
+        ATTR_IS_HEADING: bool(getattr(ingredient, ATTR_IS_HEADING, False)),
+        ATTR_ID: getattr(ingredient, ATTR_ID, None),
     }
 
 
@@ -398,7 +431,7 @@ async def _async_load_recipes(
 
 
 def _build_ingredients(ingredients_data: list[dict[str, Any]]) -> list[Any]:
-    """Build AnyList Ingredient objects from service data."""
+    """Build AnyList ingredients and headings from service data, in order."""
     return [
         Ingredient(
             name=ingredient_data[ATTR_NAME],
@@ -407,6 +440,8 @@ def _build_ingredients(ingredients_data: list[dict[str, Any]]) -> list[Any]:
             raw_ingredient=_normalize_optional_string(
                 ingredient_data.get(ATTR_RAW_INGREDIENT)
             ),
+            is_heading=ingredient_data[ATTR_IS_HEADING],
+            id=_normalize_optional_string(ingredient_data.get(ATTR_ID)),
         )
         for ingredient_data in ingredients_data
     ]

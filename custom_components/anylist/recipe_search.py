@@ -78,8 +78,9 @@ def search_recipes(
 
     Exact normalized titles score 100, all exact title words score 90, and
     remaining matches score at most 80 by query coverage. Title exact/typo
-    weights are 1/0.8; ingredient exact/typo weights are 0.45/0.3. Require at
-    least half the unique query words and never pad to the requested limit.
+    weights are 1/0.8; ingredient exact/typo weights are 0.45/0.3. Ingredient
+    headings are not matched. Require at least half the unique query words and
+    never pad to the requested limit.
     """
     normalized_query = normalize_search_text(query)
     if not normalized_query:
@@ -96,9 +97,12 @@ def search_recipes(
         ingredient_exact: set[str] = set()
         ingredient_fuzzy: set[str] = set()
         if include_ingredients and remaining:
+            # Headings such as "For the sauce" group ingredients; their words
+            # are not ingredient names and would match common query words.
             ingredient_words = {
                 word
                 for ingredient in recipe.ingredients
+                if not getattr(ingredient, "is_heading", False)
                 for word in normalize_search_text(ingredient.name or "").split()
             }
             ingredient_exact = _take_matches(remaining, ingredient_words)
