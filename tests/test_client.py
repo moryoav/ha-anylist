@@ -97,6 +97,46 @@ def _recipes_user_data() -> bytes:
     return client_module._field_message(3, recipes_response)
 
 
+def _recipes_with_headings_user_data() -> bytes:
+    """Build user data containing a recipe with ingredient headings."""
+    heading_with_id = (
+        client_module._field_string(2, "For the sauce")
+        + client_module._field_string(6, "sec-1")
+        + client_module._field_bool(7, True)
+    )
+    tomatoes = (
+        client_module._field_string(1, "500 g tomatoes")
+        + client_module._field_string(2, "Tomatoes")
+        + client_module._field_string(3, "500 g")
+    )
+    heading_without_id = (
+        client_module._field_string(2, "Topping")
+        + client_module._field_bool(7, True)
+    )
+    basil = (
+        client_module._field_string(2, "Basil")
+        + client_module._field_bool(7, False)
+    )
+    nameless_heading = client_module._field_bool(7, True)
+    nameless_ingredient = client_module._field_string(3, "a pinch")
+    recipe = (
+        client_module._field_string(1, "recipe-headings")
+        + client_module._field_string(3, "Headed Pasta")
+        + client_module._field_message(8, heading_with_id)
+        + client_module._field_message(8, tomatoes)
+        + client_module._field_message(8, heading_without_id)
+        + client_module._field_message(8, basil)
+        + client_module._field_message(8, nameless_heading)
+        + client_module._field_message(8, nameless_ingredient)
+        + client_module._field_string(9, "Simmer the sauce")
+    )
+    recipes_response = (
+        client_module._field_message(3, recipe)
+        + client_module._field_string(9, "recipe-data-1")
+    )
+    return client_module._field_message(3, recipes_response)
+
+
 async def test_async_call_with_timeout_times_out() -> None:
     """Test executor calls are capped by a timeout."""
 
@@ -246,6 +286,97 @@ def test_client_recipe_mutations_write_expected_operations() -> None:
     assert len(captured) == 4
     assert captured[0][0] == "data/user-recipe-data/update"
     assert captured[-1][0] == "data/shopping-lists/update"
+
+
+def test_client_parses_recipe_ingredient_headings() -> None:
+    """Test headed recipes keep headings in order and out of ingredients."""
+    client = _client()
+    client.get_user_data = lambda: _recipes_with_headings_user_data()
+
+    recipe = client.get_recipe_by_name("Headed Pasta")
+    assert [ingredient.name for ingredient in recipe.ingredients] == [
+        "Tomatoes",
+        "Basil",
+    ]
+    assert recipe.ingredients[0].quantity == "500 g"
+    assert recipe.ingredients[0].raw_ingredient == "500 g tomatoes"
+
+    entries = recipe.ingredient_entries
+    assert len(entries) == 4
+    assert isinstance(entries[0], client_module.RecipeIngredientSection)
+    assert entries[0].name == "For the sauce"
+    assert entries[0].identifier == "sec-1"
+    assert entries[1].name == "Tomatoes"
+    assert isinstance(entries[2], client_module.RecipeIngredientSection)
+    assert entries[2].name == "Topping"
+    # The server omitted this heading's identifier, so one is generated.
+    assert entries[2].identifier
+    assert entries[3].name == "Basil"
+
+
+def test_client_headingless_recipe_entries_mirror_ingredients() -> None:
+    """Test recipes without headings keep the old shapes exactly."""
+    client = _client()
+    client.get_user_data = lambda: _recipes_user_data()
+
+    recipe = client.get_recipe_by_name("Weeknight Pasta")
+    assert [entry.name for entry in recipe.ingredient_entries] == ["Pasta"]
+    assert recipe.ingredient_entries[0] is recipe.ingredients[0]
+
+
+def test_parse_ingredient_ignores_headings() -> None:
+    """Test the plain ingredient parser never returns a heading."""
+    heading = (
+        client_module._field_string(2, "For the sauce")
+        + client_module._field_string(6, "sec-1")
+        + client_module._field_bool(7, True)
+    )
+    assert client_module._parse_ingredient(heading) is None
+    entry = client_module._parse_ingredient_entry(heading)
+    assert isinstance(entry, client_module.RecipeIngredientSection)
+    assert entry.name == "For the sauce"
+    assert entry.identifier == "sec-1"
+
+    parsed = client_module._parse_ingredient(client_module._field_string(2, "Pasta"))
+    assert parsed is not None and parsed.name == "Pasta"
+    assert client_module._parse_ingredient(b"") is None
+
+
+def test_client_add_recipe_to_list_skips_headings() -> None:
+    """Test headings never become shopping-list items."""
+    client = _client()
+    client.get_user_data = lambda: (
+        _shopping_user_data() + _recipes_with_headings_user_data()
+    )
+    added: list[tuple[str, str | None]] = []
+    client.add_item_with_details = lambda list_id, name, quantity, *args, **kwargs: added.append(
+        (name, quantity)
+    )
+
+    client.add_recipe_to_list("recipe-headings", "list-1")
+
+    assert added == [("Tomatoes", "500 g"), ("Basil", None)]
+
+
+def test_client_add_recipe_to_list_skips_headings_at_top() -> None:
+    """Test headings are skipped when items are added in reverse at the top."""
+    client = _client()
+    top_list = (
+        client_module._field_string(1, "list-1")
+        + client_module._field_string(3, "Groceries")
+        + client_module._field_int32(18, 1)
+    )
+    shopping_response = client_module._field_message(1, top_list)
+    client.get_user_data = lambda: (
+        client_module._field_message(1, shopping_response)
+        + _recipes_with_headings_user_data()
+    )
+    added: list[str] = []
+    client.add_item_with_details = lambda list_id, name, *args, **kwargs: added.append(name)
+
+    client.add_recipe_to_list("recipe-headings", "list-1")
+
+    assert added == ["Basil", "Tomatoes"]
 
 
 def test_client_enable_icalendar_extracts_token() -> None:

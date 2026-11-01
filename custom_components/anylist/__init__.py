@@ -34,6 +34,7 @@ from .client import (
     AnyListHTTPError,
     AnyListTimeoutError,
     Ingredient,
+    RecipeIngredientSection,
     async_call_with_timeout,
 )
 from .const import (
@@ -332,6 +333,18 @@ def _serialize_ingredient(ingredient: Any) -> dict[str, Any]:
     }
 
 
+def _serialize_ingredient_entry(entry: Any) -> dict[str, Any]:
+    """Serialize one ordered ingredient-list entry.
+
+    Section headings serialize as `{"type": "section", "name": ...}`;
+    plain ingredients serialize as `{"type": "ingredient", ...}` with the
+    same four fields as the flat `ingredients` list.
+    """
+    if isinstance(entry, RecipeIngredientSection):
+        return {"type": "section", ATTR_NAME: entry.name}
+    return {"type": "ingredient", **_serialize_ingredient(entry)}
+
+
 def _serialize_recipe(
     recipe: Any,
     *,
@@ -340,10 +353,18 @@ def _serialize_recipe(
 ) -> dict[str, Any]:
     """Serialize an AnyList recipe for service responses."""
     ingredients = []
+    ingredient_entries = []
     if include_ingredients:
         ingredients = [
             _serialize_ingredient(ingredient)
             for ingredient in (getattr(recipe, ATTR_INGREDIENTS, []) or [])
+        ]
+        # `ingredient_entries` is the ordered, heading-aware view of the
+        # same list; recipes parsed before this field existed simply have
+        # none, and callers fall back to `ingredients`.
+        ingredient_entries = [
+            _serialize_ingredient_entry(entry)
+            for entry in (getattr(recipe, "ingredient_entries", []) or [])
         ]
 
     preparation_steps = []
@@ -354,6 +375,7 @@ def _serialize_recipe(
         "id": getattr(recipe, "id", None),
         ATTR_NAME: getattr(recipe, ATTR_NAME, None),
         ATTR_INGREDIENTS: ingredients,
+        "ingredient_entries": ingredient_entries,
         ATTR_PREPARATION_STEPS: preparation_steps,
         ATTR_NOTE: getattr(recipe, ATTR_NOTE, None),
         "source_name": getattr(recipe, "source_name", None),

@@ -480,6 +480,31 @@ data:
 response_variable: anylist_recipes
 ```
 
+Recipes whose ingredients are grouped under headings in AnyList return those
+headings in `ingredient_entries`, in the same order as the app shows them:
+
+```yaml
+ingredient_entries:
+  - type: section
+    name: For the sauce
+  - type: ingredient
+    name: Tomatoes
+    quantity: 500 g
+    note: null
+    raw_ingredient: 500 g tomatoes
+  - type: ingredient
+    name: Garlic
+    quantity: 2 cloves
+    note: minced
+    raw_ingredient: 2 cloves garlic, minced
+```
+
+The flat `ingredients` list is unchanged and still holds plain ingredients
+only, so automations and `add_recipe_to_list` never see a heading.
+`ingredient_entries` is included whenever `include_ingredients` is true and
+is empty otherwise. Search results remain compact candidates and do not
+include ingredient data.
+
 ### Find and manage recipe collections
 
 `get_recipe`, `get_recipes`, and `search_recipes` include a `collections` array
