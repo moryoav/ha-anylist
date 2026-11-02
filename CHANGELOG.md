@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.12.0 - 2026-11-02
+
 - Return recipe ingredient headings in place in the `ingredients` of
   `get_recipe`, `get_recipes`, `create_recipe`, and `update_recipe` responses.
   Each entry now includes `is_heading` and AnyList's `id`.
