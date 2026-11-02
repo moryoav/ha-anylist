@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 0.12.0 - 2026-11-02
+
+- Return recipe ingredient headings in place in the `ingredients` of
+  `get_recipe`, `get_recipes`, `create_recipe`, and `update_recipe` responses.
+  Each entry now includes `is_heading` and AnyList's `id`.
+- Accept headings (`is_heading: true`) and `id` in `create_recipe` and
+  `update_recipe` ingredients. Supplied IDs are kept; entries without one get a
+  new ID, as in the AnyList apps. A heading with a quantity, note, or raw
+  ingredient is rejected.
+- Fix `update_recipe` turning ingredient headings into plain ingredients when
+  the ingredients from `get_recipe` are passed back, and fix `create_recipe`
+  and `update_recipe` saving ingredients without AnyList IDs.
+- `add_recipe_to_list` no longer adds ingredient headings to the shopping list.
+- `search_recipes` with `include_ingredients` no longer matches words in
+  ingredient headings.
+
 ## 0.11.0 - 2026-10-25
 
 - Add collection names and IDs to recipes returned by `get_recipe`, `get_recipes`,

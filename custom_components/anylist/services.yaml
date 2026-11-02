@@ -182,7 +182,7 @@ search_recipes:
           mode: box
     include_ingredients:
       name: Search ingredient names
-      description: Also match ingredient names, with less weight than titles. Ingredients and preparation steps are never included in search results.
+      description: Also match ingredient names, with less weight than titles. Ingredient headings are not matched. Ingredients and preparation steps are never included in search results.
       default: false
       selector:
         boolean:
@@ -218,7 +218,7 @@ get_recipes:
         text:
     include_ingredients:
       name: Include ingredients
-      description: Include ingredients in each returned recipe.
+      description: Include ingredients in each returned recipe, in AnyList order. Headings that group ingredients are included with is_heading set to true.
       default: true
       selector:
         boolean:
@@ -266,7 +266,7 @@ get_recipe:
         text:
     include_ingredients:
       name: Include ingredients
-      description: Include ingredients in the returned recipe.
+      description: Include ingredients in the returned recipe, in AnyList order. Headings that group ingredients are included with is_heading set to true.
       default: true
       selector:
         boolean:
@@ -279,7 +279,7 @@ get_recipe:
 
 add_recipe_to_list:
   name: Add recipe to list
-  description: Add an AnyList recipe's ingredients to a shopping list.
+  description: Add an AnyList recipe's ingredients to a shopping list. Ingredient headings are skipped.
   fields:
     config_entry_id:
       name: Config entry ID
@@ -349,9 +349,11 @@ create_recipe:
         text:
     ingredients:
       name: Ingredients
-      description: List of ingredient objects with a required name and optional quantity, note, and raw_ingredient fields.
+      description: Ordered list of ingredient objects with a required name and optional quantity, note, and raw_ingredient fields. Set is_heading to true to make an entry a heading that groups the ingredients after it; a heading takes only a name. An optional id sets the entry's AnyList ID; entries without one get a new ID.
       required: true
       example:
+        - name: Dough
+          is_heading: true
         - name: Flour
           quantity: 500 g
         - name: Water
@@ -406,9 +408,11 @@ update_recipe:
         text:
     ingredients:
       name: Ingredients
-      description: Complete replacement ingredient list.
+      description: Complete replacement ingredient list, in order, including headings (is_heading set to true). To keep a recipe's headings and AnyList IDs, pass back the ingredients returned by get_recipe, including each id. Entries without an id get a new one.
       required: true
       example:
+        - name: Dough
+          is_heading: true
         - name: Flour
           quantity: 500 g
         - name: Water

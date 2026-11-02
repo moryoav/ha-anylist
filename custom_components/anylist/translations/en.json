@@ -237,7 +237,7 @@
         },
         "include_ingredients": {
           "name": "Search ingredient names",
-          "description": "Also match ingredient names, with less weight than titles. Ingredients and preparation steps are never included in search results."
+          "description": "Also match ingredient names, with less weight than titles. Ingredient headings are not matched. Ingredients and preparation steps are never included in search results."
         },
         "collection_id": {
           "name": "Collection ID",
@@ -263,7 +263,7 @@
         },
         "include_ingredients": {
           "name": "Include ingredients",
-          "description": "Include ingredients in each returned recipe."
+          "description": "Include ingredients in each returned recipe, in AnyList order. Headings that group ingredients are included with is_heading set to true."
         },
         "include_steps": {
           "name": "Include preparation steps",
@@ -297,7 +297,7 @@
         },
         "include_ingredients": {
           "name": "Include ingredients",
-          "description": "Include ingredients in the returned recipe."
+          "description": "Include ingredients in the returned recipe, in AnyList order. Headings that group ingredients are included with is_heading set to true."
         },
         "include_steps": {
           "name": "Include preparation steps",
