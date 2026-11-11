@@ -9,6 +9,7 @@ from email.utils import formatdate
 from email.parser import BytesParser
 from io import BytesIO
 import json
+import math
 import threading
 from types import SimpleNamespace
 from urllib.error import HTTPError
@@ -907,6 +908,32 @@ async def test_abandoned_queued_mutation_never_starts(hass, monkeypatch, cancel)
     server = HttpQueue(monkeypatch, [])
     entered, release = threading.Event(), threading.Event()
     started, finished = threading.Event(), threading.Event()
+
+    if not cancel:
+        deadline_type = wire._OperationDeadline
+        wait_for = asyncio.wait_for
+        deadlines = []
+
+        def deferred_deadline(expires):
+            """Leave executor scheduling outside this lock-wait test's timer."""
+            deadline = deadline_type(math.inf)
+            deadlines.append(deadline)
+            return deadline
+
+        async def wait_after_start(future, *, timeout):
+            """Arm both real deadlines only after the worker has begun."""
+            assert await hass.async_add_executor_job(started.wait, 3)
+            deadlines[0].expires = wire.time.monotonic() + timeout
+            return await wait_for(future, timeout=timeout)
+
+        monkeypatch.setattr(wire, "_OperationDeadline", deferred_deadline)
+        monkeypatch.setattr(
+            wire,
+            "asyncio",
+            SimpleNamespace(
+                wait_for=wait_after_start, TimeoutError=asyncio.TimeoutError
+            ),
+        )
 
     def hold_gate():
         with client._sync.gate.lock:

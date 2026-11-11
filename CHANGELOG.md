@@ -27,6 +27,7 @@
 - Remove the unused full-account download method from the bundled client.
 - Log rejected sync responses and recovery attempts so repeated full fetches
   are visible in Home Assistant logs without exposing account contents.
+- Stabilize queued-action timeout regression coverage on busy test runners.
 
 ## 0.12.0 - 2026-11-02
 
