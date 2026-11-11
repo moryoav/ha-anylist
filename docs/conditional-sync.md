@@ -67,7 +67,9 @@ using Home Assistant's private atomic storage. Authentication tokens and
 passwords are excluded. On restart, every restored resource revalidates before
 its snapshot is considered current. Storage belongs to the verified AnyList
 user ID, so changing the account email retains its cache and cooldown. Removing
-the integration clears that account's snapshots.
+the integration clears that account's snapshots. A private lookup between hashed
+email and account keys retains cooldown discovery before login, including after
+unfinished setup or removal. The lookup contains no email address or snapshots.
 
 ## Rate limits and diagnostics
 

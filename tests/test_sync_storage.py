@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import threading
 from unittest.mock import patch
 
@@ -195,6 +196,43 @@ async def test_new_email_is_bound_to_the_verified_account_before_data_reads(hass
         login.assert_called_once()
 
 
+@pytest.mark.parametrize("remove_entry", [False, True])
+async def test_verified_email_blocks_login_after_restart_without_a_config_entry(
+    hass, monkeypatch, remove_entry
+):
+    """Failed setup and removal must retain the account ban before any auth IO."""
+    auth = json.dumps(
+        {
+            "access_token": "access",
+            "refresh_token": "refresh",
+            "user_id": "user-1",
+            "is_premium_user": True,
+        }
+    ).encode()
+    responses = [("/auth/token", 200, auth)]
+    if remove_entry:
+        responses.append(("/data/shopping-lists/all", 200, initial_lists()))
+    responses.append(("/data/shopping-lists/all", 429, b'{"retry_after":3600}'))
+    server = HttpQueue(monkeypatch, responses)
+    client, store = await async_create_client(hass, "user@example.com", "secret")
+    if remove_entry:
+        await wire.async_call_with_timeout(hass, client.get_lists)
+    with pytest.raises(wire.AnyListHTTPError):
+        await wire.async_call_with_timeout(hass, client.get_lists)
+    if remove_entry:
+        await async_remove_sync_store(hass, "user@example.com", account_id="user-1")
+        assert store.state["resources"] == {}
+    client.close()
+    hass.data.pop("anylist_sync_stores")
+    with pytest.raises(wire.AnyListHTTPError) as error:
+        await async_create_client(hass, " USER@example.com ", "secret")
+    assert error.value.status == 429
+    assert sum(path == "/auth/token" for path, _ in server.calls) == 1
+    assert not server.responses
+    restored = await async_get_sync_store(hass, "user@example.com")
+    assert restored.gate.until > wire.time.time() + 3590
+
+
 async def test_reconfigure_then_remove_deletes_the_accounts_saved_contents(hass):
     """Changing email must keep one store and remove its private snapshots."""
     store = await async_get_sync_store(hass, "old@example.com", account_id="user-1")
@@ -207,6 +245,9 @@ async def test_reconfigure_then_remove_deletes_the_accounts_saved_contents(hass)
         "custom_components.anylist.client.AnyListClient.login",
         return_value=real_client(),
     ):
+        await async_create_client(
+            hass, "old@example.com", "secret", account_id="user-1"
+        )
         _, reconfigured = await async_create_client(
             hass, "new@example.com", "secret", account_id="user-1"
         )
@@ -214,6 +255,9 @@ async def test_reconfigure_then_remove_deletes_the_accounts_saved_contents(hass)
     await async_remove_sync_store(hass, "new@example.com", account_id="user-1")
     assert await store.store.async_load() is None
     assert (await other.store.async_load())["resources"] == {"lists": "other-account"}
+    hass.data.pop("anylist_sync_stores")
+    for email in ("old@example.com", "new@example.com"):
+        assert not (await async_get_sync_store(hass, email)).state
 
 
 async def test_removal_deletes_cached_contents_but_keeps_an_active_ban(hass):
