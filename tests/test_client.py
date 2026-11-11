@@ -12,16 +12,26 @@ import pytest
 
 from custom_components.anylist import client as client_module
 
+from .conftest import stub_snapshot_reads
+
 
 def _client() -> client_module.AnyListClient:
-    """Return an authenticated client."""
-    return client_module.AnyListClient(
+    """Stub snapshot reads for the existing parser and operation payload tests.
+
+    Conditional HTTP and cache behavior is covered with an unstubbed client in
+    test_conditional_sync.py. These tests continue supplying their synthetic
+    PBUserDataResponse through read_snapshot, without using the live endpoint.
+    """
+    client = client_module.AnyListClient(
         access_token="access",
         refresh_token="refresh",
         user_id="user-1",
         is_premium_user=True,
         client_identifier="client-1",
     )
+
+    stub_snapshot_reads(client)
+    return client
 
 
 def _shopping_user_data() -> bytes:
@@ -158,7 +168,7 @@ def test_parse_helpers_cover_missing_and_invalid_payloads() -> None:
 def test_client_parses_user_data() -> None:
     """Test user data accessors parse lists, favourites, and recipes."""
     client = _client()
-    client.get_user_data = lambda: (
+    client.read_snapshot = lambda: (
         _shopping_user_data() + _favourites_user_data() + _recipes_user_data()
     )
 
@@ -186,7 +196,7 @@ def test_client_parses_user_data() -> None:
 def test_client_missing_user_data_sections_return_empty() -> None:
     """Test absent user data sections return empty lists."""
     client = _client()
-    client.get_user_data = lambda: b""
+    client.read_snapshot = lambda: b""
 
     assert client.get_lists() == []
     assert client.get_favourites_lists() == []
@@ -206,7 +216,7 @@ def test_client_list_mutations_write_expected_operations() -> None:
     client = _client()
     captured: list[tuple[str, bytes]] = []
     client.post = lambda path, body: captured.append((path, body))
-    client.get_user_data = lambda: _shopping_user_data()
+    client.read_snapshot = lambda: _shopping_user_data()
 
     item = client.add_item("list-1", "Bread")
     client.update_item("list-1", "item-1", "Milk", quantity="3", details="whole")
@@ -229,7 +239,7 @@ def test_client_recipe_mutations_write_expected_operations() -> None:
     client = _client()
     captured: list[tuple[str, bytes]] = []
     client.post = lambda path, body: captured.append((path, body))
-    client.get_user_data = lambda: _recipes_user_data()
+    client.read_snapshot = lambda: _recipes_user_data()
     ingredient = client_module.Ingredient(
         name="Pasta",
         quantity="2 box",
@@ -459,7 +469,7 @@ def test_client_transport_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
         )
 
 
-def test_authenticated_post_and_get_user_data(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_authenticated_post_wrappers(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test authenticated post wrappers."""
     client = _client()
     calls: list[tuple[str, dict[str, object]]] = []
@@ -467,11 +477,14 @@ def test_authenticated_post_and_get_user_data(monkeypatch: pytest.MonkeyPatch) -
     def fake_request(*args, **kwargs):
         endpoint = args[0] if isinstance(args[0], str) else args[1]
         calls.append((endpoint, kwargs))
-        return b"user-data"
+        return b"resource-data"
 
     monkeypatch.setattr(client_module.AnyListClient, "_request_multipart", fake_request)
 
-    assert client._authenticated_multipart("/endpoint", "operations", b"body") == b"user-data"
+    assert client._authenticated_multipart("/endpoint", "operations", b"body") == b"resource-data"
     assert calls[-1][1]["headers"]["Authorization"] == "Bearer access"
-    assert client.post("data/user-data/get", b"") == b"user-data"
-    assert client.get_user_data() == b"user-data"
+    assert client.post("data/shopping-lists/update", b"operations") == b"resource-data"
+    assert client.post_multipart(
+        "/data/user-recipe-data/all", files={"timestamp": b"cursor"}
+    ) == b"resource-data"
+    assert calls[-1][1]["files"] == {"timestamp": b"cursor"}

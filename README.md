@@ -305,7 +305,13 @@ a category leaves existing items and the set's default category unchanged.
 
 ## Data Updates
 
-The integration uses Home Assistant's `DataUpdateCoordinator` and polls AnyList every 60 seconds by default. Set **Polling Interval** in the integration options to configure the polling interval to a custom value. Mutations such as adding, checking, deleting, or recipe-to-list actions request an immediate refresh after the AnyList operation completes.
+The integration uses Home Assistant's `DataUpdateCoordinator` and polls shopping lists every 60 seconds by default. Set **Polling Interval** in the integration options to change this interval. List requests send the last received item and metadata timestamps, so unchanged lists return HTTP 304 and changed lists do not require downloading recipes or other account data.
+
+Favourites and legacy list settings use separate conditional caches with a five-minute refresh interval. Recipes and collections load when requested and share a five-minute cache, including between a recipe search and a detail read. Mutations invalidate the affected cache; shopping-list actions wait for immediate conditional readback before returning. `anylist.refresh` also makes the next read of each loaded secondary cache revalidate it with AnyList.
+
+If AnyList responds with HTTP 429, the integration pauses account requests for the server's retry delay. Actions fail visibly during that pause. Changing the polling interval or reloading Home Assistant does not bypass it. Saved snapshots and their timestamps are stored together in Home Assistant's private storage, without authentication tokens. Removing the integration clears cached account contents while retaining any unexpired cooldown.
+
+See the [conditional synchronization protocol](docs/conditional-sync.md) for request formats, cache behavior, and diagnostics.
 
 If AnyList is unavailable, entities are marked unavailable through the coordinator until the next successful refresh.
 

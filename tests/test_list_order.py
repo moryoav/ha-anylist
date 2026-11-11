@@ -35,7 +35,7 @@ from custom_components.anylist.select import (
 )
 from custom_components.anylist.todo import AnyListTodoEntity
 
-from .conftest import FakeAnyListClient, FakeCoordinator, fake_item, fake_list
+from .conftest import FakeAnyListClient, FakeCoordinator, fake_item, fake_list, stub_snapshot_reads
 
 TODO_ENTITY = "todo.anylist_groceries"
 SORT_ORDER_ENTITY = "select.anylist_groceries_item_sort_order"
@@ -152,9 +152,10 @@ def _operations(captured: list[bytes]) -> list[dict[str, Any]]:
 def _capturing_client(user_data: bytes = b"") -> tuple[client_module.AnyListClient, list[bytes]]:
     """Return a bundled client that records posted operation lists."""
     client = _real_client()
+    stub_snapshot_reads(client)
     captured: list[bytes] = []
     client.post = lambda path, body: captured.append(body)
-    client.get_user_data = lambda: user_data
+    client.read_snapshot = lambda: user_data
     return client, captured
 
 

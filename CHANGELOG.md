@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+## 0.13.0 - 2026-11-11
+
+- Replace repeated full-account downloads with conditional shopping-list,
+  recipe, favourite, and settings requests. Keep the 60-second shopping-list
+  polling default and merge incremental changes without losing unchanged data.
+- Cache recipes and favourites separately for up to five minutes and reuse
+  recipe data between searches and detail reads. Revalidate item changes
+  immediately and refresh secondary caches on the next read after
+  `anylist.refresh`.
+- Honour AnyList's HTTP 429 retry delay across polling, actions, and setup.
+  Save cooldowns and coherent snapshots across reloads and restarts, and expose
+  request counts and cache status in diagnostics. Keep account state when its
+  email changes, retain cooldown checks after unfinished setup or removal, and
+  prevent queued actions from starting after their timeout.
+- Recover rejected incremental updates with one full fetch of the affected
+  resource instead of retaining unusable cursors across polls and restarts.
+- Retain timestamps for unnamed lists while skipping them from visible lists,
+  so they cannot interrupt syncing or cause repeated full downloads.
+- Send recipe ingredients in one shopping-list update, preserving ingredient
+  order, quantities and notes without a timeout between individual writes.
+- Keep credential-validation snapshots in memory until the integration is
+  configured, so abandoning setup leaves no cached list contents on disk.
+- Remove the unused full-account download method from the bundled client.
+- Log rejected sync responses and recovery attempts so repeated full fetches
+  are visible in Home Assistant logs without exposing account contents.
+- Stabilize queued-action timeout regression coverage on busy test runners.
+
 ## 0.12.0 - 2026-11-02
 
 - Return recipe ingredient headings in place in the `ingredients` of

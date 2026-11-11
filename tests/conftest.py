@@ -8,7 +8,28 @@ from typing import Any
 
 import pytest
 
+from custom_components.anylist import client as wire
 from custom_components.anylist.client import select_recipe_collection
+
+
+def stub_snapshot_reads(client) -> None:
+    """Adapt legacy synthetic snapshots at the resource boundary, without HTTP.
+
+    Parser and operation tests supply complete PBUserDataResponse fixtures. The
+    conditional-sync tests instead exercise the real resource and HTTP paths.
+    """
+    def missing_snapshot():
+        """Require an explicit synthetic provider whenever a test reads data."""
+        raise AssertionError("Missing synthetic snapshot fixture")
+
+    client.read_snapshot = missing_snapshot
+
+    def read_resource(name, **kwargs):
+        """Read the requested section from the test's current synthetic data."""
+        number = {"lists": 1, "recipes": 3, "favourites": 7, "settings": 9}[name]
+        return wire._first_value(wire._parse_fields(client.read_snapshot()), number) or b""
+
+    client._read_resource = read_resource
 
 
 @pytest.fixture(autouse=True)
@@ -60,6 +81,24 @@ class FakeAnyListClient:
     def user_id(self) -> str:
         """Return the fake account ID."""
         return self._user_id
+
+    def configure_sync(self, state, on_change, gate) -> None:
+        """Match the client's persistence interface without changing fake data."""
+        self.sync_gate = gate
+
+    def export_sync_state(self) -> dict:
+        """Return credential-free state for integration unload tests."""
+        return {"version": 1, "user_id": self._user_id, "resources": {}}
+
+    def sync_diagnostics(self) -> dict:
+        """Provide the optional sync diagnostics surface."""
+        return {}
+
+    def close(self) -> None:
+        """Match the unload hook without performing any network work."""
+
+    def request_refresh(self) -> None:
+        """Match explicit cache invalidation before a coordinator refresh."""
 
     def get_lists(self) -> list[Any]:
         """Return fake shopping lists."""

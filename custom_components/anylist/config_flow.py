@@ -29,7 +29,6 @@ from .client import (
 )
 from .const import (
     ANYLIST_DEFAULT_POLL_INTERVAL,
-    ANYLIST_LOGIN_TIMEOUT,
     ANYLIST_MAX_POLL_INTERVAL,
     ANYLIST_MIN_POLL_INTERVAL,
     ANYLIST_REQUEST_TIMEOUT,
@@ -38,6 +37,7 @@ from .const import (
     CONF_SELECTED_LISTS,
     DOMAIN,
 )
+from .sync_storage import async_create_client
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -88,15 +88,13 @@ async def _async_validate_credentials(
     hass,
     email: str,
     password: str,
+    *,
+    account_id: str | None = None,
 ) -> tuple[str, AnyListClient, list[tuple[str, str]]]:
     """Validate credentials and return account information."""
     try:
-        client = await async_call_with_timeout(
-            hass,
-            AnyListClient.login,
-            email,
-            password,
-            timeout=ANYLIST_LOGIN_TIMEOUT,
+        client, _ = await async_create_client(
+            hass, email, password, account_id=account_id, persist_snapshots=False
         )
         lists = await async_call_with_timeout(
             hass,
@@ -187,7 +185,7 @@ class AnyListConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             password = user_input[CONF_PASSWORD]
             try:
                 user_id, _, _ = await _async_validate_credentials(
-                    self.hass, email, password
+                    self.hass, email, password, account_id=reauth_entry.unique_id
                 )
             except InvalidAuth:
                 errors["base"] = "invalid_auth"
@@ -220,7 +218,7 @@ class AnyListConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             password = user_input[CONF_PASSWORD]
             try:
                 user_id, _, _ = await _async_validate_credentials(
-                    self.hass, email, password
+                    self.hass, email, password, account_id=reconfigure_entry.unique_id
                 )
             except InvalidAuth:
                 errors["base"] = "invalid_auth"

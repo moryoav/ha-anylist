@@ -124,7 +124,7 @@ class RecipeServer:
         """Return a PBRecipe's identifier."""
         return client_module._first_string(_parse_fields(recipe), 1)
 
-    def get_user_data(self) -> bytes:
+    def read_snapshot(self) -> bytes:
         """Return the current recipes as user data."""
         return _user_data(*self.recipes.values())
 
@@ -140,7 +140,7 @@ class RecipeServer:
 def _server_client(server: RecipeServer) -> client_module.AnyListClient:
     """Return a real client that reads from and saves to the fake server."""
     client = _client()
-    client.get_user_data = server.get_user_data
+    client.read_snapshot = server.read_snapshot
     client.post = server.post
     return client
 
@@ -161,7 +161,7 @@ async def _setup(hass: HomeAssistant, client: object) -> None:
 def test_headings_parse_in_place_with_stored_ids() -> None:
     """Headings stay in ingredient order, flagged, with AnyList's own IDs."""
     client = _client()
-    client.get_user_data = lambda: _user_data(_recipe())
+    client.read_snapshot = lambda: _user_data(_recipe())
 
     recipe = client.get_recipe_by_id(RECIPE_ID)
 
@@ -183,7 +183,7 @@ def test_headings_parse_in_place_with_stored_ids() -> None:
 def test_nameless_entries_are_skipped() -> None:
     """Entries without a name are skipped, headings included."""
     client = _client()
-    client.get_user_data = lambda: _user_data(
+    client.read_snapshot = lambda: _user_data(
         _recipe(
             (
                 _entry(None, identifier="blank-heading", heading=True),
@@ -285,25 +285,33 @@ def test_add_recipe_to_list_skips_headings(
         + _field_int32(18, position)
     )
     lists = _field_message(1, _field_message(1, shopping_list))
-    client.get_user_data = lambda: lists + _user_data(_recipe())
-    added: list[tuple[str, str | None, str | None, bool]] = []
-    client.add_item_with_details = (
-        lambda list_id, name, quantity, details, category, assignment, top: added.append(
-            (name, quantity, details, top)
-        )
-    )
+    client.read_snapshot = lambda: lists + _user_data(_recipe())
+    captured = []
+    client.post = lambda path, body: captured.append((path, body))
 
     client.add_recipe_to_list(RECIPE_ID, "list-1")
 
-    assert [name for name, *_ in added] == expected
-    assert {top for *_, top in added} == {at_top}
-    assert ("Garlic", "2 cloves", "minced", at_top) in added
+    assert len(captured) == 1
+    assert captured[0][0] == "data/shopping-lists/update"
+    operations = [
+        _parse_fields(raw)
+        for raw in client_module._all_values(_parse_fields(captured[0][1]), 1)
+    ]
+    items = [client_module._parse_list_item(_first_value(raw, 6)) for raw in operations]
+    assert [item.name for item in items] == expected
+    assert ("Garlic", "2 cloves", "minced") in {
+        (item.name, item.quantity, item.details) for item in items
+    }
+    assert {
+        client_module._first_int(_parse_fields(_first_value(raw, 7) or b""), 18)
+        for raw in operations
+    } == {1 if at_top else None}
 
 
 def test_search_does_not_match_heading_words() -> None:
     """Ingredient search matches ingredient names, not heading text."""
     client = _client()
-    client.get_user_data = lambda: _user_data(_recipe())
+    client.read_snapshot = lambda: _user_data(_recipe())
     recipes = client.get_recipes()
 
     assert search_recipes(recipes, "sauce", include_ingredients=True)["count"] == 0

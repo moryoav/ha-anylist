@@ -67,7 +67,7 @@ def test_recipe_image_upload_wire_format_and_auth_refresh(monkeypatch) -> None:
 def test_create_recipe_saves_uploaded_photo_id(monkeypatch, photo_id) -> None:
     """The save operation attaches photoIds (11), not an external photoUrls (13)."""
     client = _client()
-    monkeypatch.setattr(client, "get_user_data", _recipes_user_data)
+    monkeypatch.setattr(client, "read_snapshot", _recipes_user_data)
     save = Mock(return_value=b"")
     monkeypatch.setattr(client, "post", save)
     created = client.create_recipe("Soup", [], ["Simmer"], photo_id)
@@ -93,7 +93,7 @@ def test_create_recipe_saves_uploaded_photo_id(monkeypatch, photo_id) -> None:
 def test_delete_recipe_sends_original_recipe_and_data_id(monkeypatch) -> None:
     """Match the web app's remove-recipe payload, including the collection ID."""
     client = _client()
-    monkeypatch.setattr(client, "get_user_data", _recipes_user_data)
+    monkeypatch.setattr(client, "read_snapshot", _recipes_user_data)
     save = Mock(return_value=b"")
     monkeypatch.setattr(client, "post", save)
     client.delete_recipe("recipe-1")
@@ -138,7 +138,7 @@ def test_uploaded_photos_take_precedence_over_source_urls() -> None:
 
 def test_missing_recipe_data_id_prevents_mutation(monkeypatch) -> None:
     client = _client()
-    monkeypatch.setattr(client, "get_user_data", lambda: b"")
+    monkeypatch.setattr(client, "read_snapshot", lambda: b"")
     save = Mock()
     monkeypatch.setattr(client, "post", save)
     with pytest.raises(client_module.AnyListError, match="recipe data ID"):
@@ -335,7 +335,7 @@ def test_update_recipe_photo_and_metadata(monkeypatch, old_photo, new_photo) -> 
         9, "recipe-data-1"
     )
     monkeypatch.setattr(
-        client, "get_user_data", lambda: client_module._field_message(3, response)
+        client, "read_snapshot", lambda: client_module._field_message(3, response)
     )
     save = Mock(return_value=b"")
     monkeypatch.setattr(client, "post", save)
@@ -359,7 +359,7 @@ def test_update_recipe_photo_and_metadata(monkeypatch, old_photo, new_photo) -> 
 
 def test_update_missing_recipe_does_not_save(monkeypatch) -> None:
     client = _client()
-    monkeypatch.setattr(client, "get_user_data", _recipes_user_data)
+    monkeypatch.setattr(client, "read_snapshot", _recipes_user_data)
     save = Mock()
     monkeypatch.setattr(client, "post", save)
     with pytest.raises(client_module.AnyListNotFoundError):
