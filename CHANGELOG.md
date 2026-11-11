@@ -13,7 +13,8 @@
   `anylist.refresh`.
 - Honour AnyList's HTTP 429 retry delay across polling, actions, and setup.
   Save cooldowns and coherent snapshots across reloads and restarts, and expose
-  request counts and cache status in diagnostics.
+  request counts and cache status in diagnostics. Keep account state when its
+  email changes and prevent queued actions from starting after their timeout.
 
 ## 0.12.0 - 2026-11-02
 

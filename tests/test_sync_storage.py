@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import threading
 from unittest.mock import patch
 
 import pytest
@@ -11,6 +13,7 @@ from homeassistant.exceptions import HomeAssistantError
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.anylist import client as wire
+from custom_components.anylist import sync_storage
 from custom_components.anylist.const import (
     CONF_MEAL_PLAN_CALENDAR,
     CONF_SELECTED_LISTS,
@@ -81,6 +84,136 @@ async def test_login_rate_limit_preserves_the_existing_cache(hass):
             await async_create_client(hass, "user@example.com", "secret")
     assert store.state["resources"] == {"lists": "cached-data"}
     assert store.state["cooldown_until"] > wire.time.time() + 80
+
+
+async def test_login_keeps_429_when_saving_its_cooldown_fails(
+    hass, monkeypatch, caplog
+):
+    """A storage failure must leave the login deadline enforced in memory."""
+    store = await async_get_sync_store(hass, "user@example.com")
+    error = wire.AnyListHTTPError(429, "rate limit", retry_after=90)
+    with (
+        patch(
+            "custom_components.anylist.client.AnyListClient.login", side_effect=error
+        ),
+        patch.object(store.store, "async_save", side_effect=OSError("disk full")),
+    ):
+        with pytest.raises(wire.AnyListHTTPError) as raised:
+            await async_create_client(hass, "user@example.com", "secret")
+    assert raised.value is error
+    assert store.gate.until > wire.time.time() + 80
+    assert "Unable to persist AnyList sync cooldown" in caplog.text
+
+
+async def test_login_rechecks_cooldown_when_its_worker_starts(hass, monkeypatch):
+    """A ban established after dispatch must prevent the queued auth request."""
+    store = await async_get_sync_store(hass, "user@example.com")
+    original = wire.async_call_with_timeout
+
+    async def delayed_dispatch(*args, **kwargs):
+        store.gate.until = wire.time.time() + 60
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(sync_storage, "async_call_with_timeout", delayed_dispatch)
+    with patch("custom_components.anylist.client.AnyListClient.login") as login:
+        with pytest.raises(wire.AnyListHTTPError):
+            await async_create_client(hass, "user@example.com", "secret")
+        login.assert_not_called()
+
+
+async def test_login_persists_a_rate_limit_arriving_after_caller_timeout(
+    hass, monkeypatch
+):
+    """The running worker must save a late 429 even without an awaiting caller."""
+    store = await async_get_sync_store(hass, "user@example.com")
+    entered, release = threading.Event(), threading.Event()
+    saved = asyncio.Event()
+    original_save = store.async_save
+
+    async def track_save(state):
+        await original_save(state)
+        saved.set()
+
+    def late_login(*args):
+        entered.set()
+        assert release.wait(3)
+        raise wire.AnyListHTTPError(429, "rate limit", retry_after=90)
+
+    monkeypatch.setattr(store, "async_save", track_save)
+    monkeypatch.setattr(sync_storage, "ANYLIST_LOGIN_TIMEOUT", 0.1)
+    with patch(
+        "custom_components.anylist.client.AnyListClient.login", side_effect=late_login
+    ) as login:
+        task = asyncio.create_task(
+            async_create_client(hass, "user@example.com", "secret")
+        )
+        try:
+            assert await hass.async_add_executor_job(entered.wait, 3)
+            with pytest.raises(wire.AnyListTimeoutError):
+                await task
+        finally:
+            release.set()
+        await asyncio.wait_for(saved.wait(), 3)
+        login.assert_called_once()
+    state = await store.store.async_load()
+    assert state["cooldown_until"] > wire.time.time() + 80
+    hass.data.pop("anylist_sync_stores")
+    with patch("custom_components.anylist.client.AnyListClient.login") as login:
+        with pytest.raises(wire.AnyListHTTPError):
+            await async_create_client(hass, "user@example.com", "secret")
+        login.assert_not_called()
+
+
+async def test_changed_email_cannot_bypass_the_known_account_cooldown(hass):
+    """Reconfiguration must retain the same identity, cache and retry deadline."""
+    store = await async_get_sync_store(hass, "old@example.com", account_id="user-1")
+    store.gate.until = wire.time.time() + 3600
+    await store.async_save({"version": 1, "user_id": "user-1", "resources": {}})
+    with patch("custom_components.anylist.client.AnyListClient.login") as login:
+        with pytest.raises(wire.AnyListHTTPError):
+            await async_create_client(
+                hass, "new@example.com", "secret", account_id="user-1"
+            )
+        login.assert_not_called()
+    assert (
+        await async_get_sync_store(hass, "new@example.com", account_id="user-1")
+        is store
+    )
+
+
+async def test_new_email_is_bound_to_the_verified_account_before_data_reads(hass):
+    """An unknown email cannot create a second data-request gate for one user."""
+    store = await async_get_sync_store(hass, "old@example.com", account_id="user-1")
+    store.gate.until = wire.time.time() + 3600
+    await store.async_save({"version": 1, "user_id": "user-1", "resources": {}})
+    with patch(
+        "custom_components.anylist.client.AnyListClient.login",
+        return_value=real_client(),
+    ) as login:
+        with pytest.raises(wire.AnyListHTTPError):
+            await async_create_client(hass, "new@example.com", "secret")
+        login.assert_called_once()
+
+
+async def test_reconfigure_then_remove_deletes_the_accounts_saved_contents(hass):
+    """Changing email must keep one store and remove its private snapshots."""
+    store = await async_get_sync_store(hass, "old@example.com", account_id="user-1")
+    await store.async_save(
+        {"version": 1, "user_id": "user-1", "resources": {"recipes": "private-cache"}}
+    )
+    other = await async_get_sync_store(hass, "other@example.com", account_id="user-2")
+    await other.async_save({"version": 1, "resources": {"lists": "other-account"}})
+    with patch(
+        "custom_components.anylist.client.AnyListClient.login",
+        return_value=real_client(),
+    ):
+        _, reconfigured = await async_create_client(
+            hass, "new@example.com", "secret", account_id="user-1"
+        )
+    assert reconfigured is store
+    await async_remove_sync_store(hass, "new@example.com", account_id="user-1")
+    assert await store.store.async_load() is None
+    assert (await other.store.async_load())["resources"] == {"lists": "other-account"}
 
 
 async def test_removal_deletes_cached_contents_but_keeps_an_active_ban(hass):

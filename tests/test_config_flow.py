@@ -332,6 +332,8 @@ async def test_reauth_flow_success(hass: HomeAssistant) -> None:
             result["flow_id"],
             {CONF_PASSWORD: "new-secret"},
         )
+        await hass.async_block_till_done()
+        assert await hass.config_entries.async_unload(entry.entry_id)
 
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reauth_successful"
@@ -400,6 +402,8 @@ async def test_reconfigure_flow_success(hass: HomeAssistant) -> None:
             result["flow_id"],
             new_data,
         )
+        await hass.async_block_till_done()
+        assert await hass.config_entries.async_unload(entry.entry_id)
 
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reconfigure_successful"

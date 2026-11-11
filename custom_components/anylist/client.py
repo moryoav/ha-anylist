@@ -16,6 +16,7 @@ import math
 import re
 import socket
 import struct
+import threading
 import time
 from typing import Any, Callable, TypeVar
 import unicodedata
@@ -50,6 +51,7 @@ _NEW_ITEM_POSITION_VALUES = {NEW_ITEM_POSITION_BOTTOM: 0, NEW_ITEM_POSITION_TOP:
 _USER_SORT_ORDER_ALPHABETICAL = "ALListItemSortOrderAlphabetical"
 
 _T = TypeVar("_T")
+_CALL_CONTEXT = threading.local()
 
 
 class AnyListError(RuntimeError):
@@ -273,21 +275,52 @@ class ICalendarInfo:
     token: str | None = None
 
 
+@dataclass(slots=True)
+class _OperationDeadline:
+    """Carry the caller's deadline and cancellation into its executor worker."""
+
+    expires: float
+    cancelled: threading.Event = field(default_factory=threading.Event)
+
+
+def _check_operation_deadline() -> None:
+    """Stop expired or cancelled workers before starting another cloud request."""
+    operation = getattr(_CALL_CONTEXT, "operation", None)
+    if operation is not None and (
+        operation.cancelled.is_set() or time.monotonic() >= operation.expires
+    ):
+        raise AnyListTimeoutError("AnyList operation expired before the request could start")
+
+
 async def async_call_with_timeout(
     hass: Any,
     func: Callable[..., _T],
     *args: Any,
     timeout: float = ANYLIST_REQUEST_TIMEOUT,
 ) -> _T:
-    """Run a synchronous client call in Home Assistant's executor with a cap."""
+    """Cap a call and prevent its worker from starting requests after expiry."""
+    operation = _OperationDeadline(time.monotonic() + timeout)
+
+    def run() -> _T:
+        """Make cancellation visible even after wait_for releases its caller."""
+        previous = getattr(_CALL_CONTEXT, "operation", None)
+        _CALL_CONTEXT.operation = operation
+        try:
+            _check_operation_deadline()
+            return func(*args)
+        finally:
+            _CALL_CONTEXT.operation = previous
+
     try:
         return await asyncio.wait_for(
-            hass.async_add_executor_job(func, *args),
+            hass.async_add_executor_job(run),
             timeout=timeout,
         )
     except asyncio.TimeoutError as err:
         name = getattr(func, "__name__", repr(func))
         raise AnyListTimeoutError(f"Timed out waiting for AnyList operation {name}") from err
+    finally:
+        operation.cancelled.set()
 
 
 def _generate_id() -> str:
@@ -2368,6 +2401,7 @@ class AnyListClient:
     @staticmethod
     def _request(req: request.Request, *, timeout: float) -> bytes:
         """Send a request with shared HTTP error handling and a socket timeout."""
+        _check_operation_deadline()
         try:
             with request.urlopen(req, timeout=timeout) as response:
                 status = response.status

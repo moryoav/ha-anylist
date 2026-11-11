@@ -11,7 +11,12 @@ from typing import Any
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.storage import Store
 
-from .client import AnyListClient, AnyListHTTPError, async_call_with_timeout
+from .client import (
+    AnyListClient,
+    AnyListHTTPError,
+    _check_operation_deadline,
+    async_call_with_timeout,
+)
 from .const import ANYLIST_LOGIN_TIMEOUT, DOMAIN
 from .sync import SyncGate
 
@@ -83,9 +88,23 @@ class AnyListSyncStore:
         await self.store.async_save(self.state)
 
 
-async def async_get_sync_store(hass: HomeAssistant, email: str) -> AnyListSyncStore:
+async def async_get_sync_store(
+    hass: HomeAssistant, email: str, *, account_id: str | None = None
+) -> AnyListSyncStore:
     """Use the same gate for config flows, reloads and the running integration."""
-    key = sha256(email.strip().casefold().encode()).hexdigest()
+    normalized = email.strip().casefold()
+    if account_id is None:
+        account_id = next(
+            (
+                entry.unique_id
+                for entry in hass.config_entries.async_entries(DOMAIN)
+                if str(entry.data.get("email", "")).strip().casefold() == normalized
+                and entry.unique_id
+            ),
+            None,
+        )
+    identity = "account:" + account_id if account_id else "email:" + normalized
+    key = sha256(identity.encode()).hexdigest()
     stores = hass.data.setdefault(_STORES, {})
     if key not in stores:
         stores[key] = AnyListSyncStore(hass, key)
@@ -95,35 +114,42 @@ async def async_get_sync_store(hass: HomeAssistant, email: str) -> AnyListSyncSt
 
 
 async def async_create_client(
-    hass: HomeAssistant, email: str, password: str
+    hass: HomeAssistant, email: str, password: str, *, account_id: str | None = None
 ) -> tuple[AnyListClient, AnyListSyncStore]:
     """Check a persisted ban before login, then restore the account's snapshots."""
-    store = await async_get_sync_store(hass, email)
+    store = await async_get_sync_store(hass, email, account_id=account_id)
     store.gate.check()
-    try:
-        client = await async_call_with_timeout(
-            hass,
-            AnyListClient.login,
-            email,
-            password,
-            timeout=ANYLIST_LOGIN_TIMEOUT,
-        )
-    except AnyListHTTPError as err:
-        if err.status == 429:
-            store.gate.until = max(
-                store.gate.until, time.time() + (err.retry_after or 3600)
-            )
-            await store.async_save(store.state)
-        raise
+
+    def login() -> AnyListClient:
+        """Guard dispatch and persist even a 429 arriving after caller timeout."""
+        with store.gate.lock:
+            _check_operation_deadline()
+            store.gate.check()
+            try:
+                return AnyListClient.login(email, password)
+            except AnyListHTTPError as err:
+                if err.status == 429:
+                    store.gate.record_rate_limit(
+                        err, lambda: store.on_change(store.state, True)
+                    )
+                raise
+
+    client = await async_call_with_timeout(hass, login, timeout=ANYLIST_LOGIN_TIMEOUT)
+    verified = await async_get_sync_store(hass, email, account_id=client.user_id())
+    verified.gate.until = max(verified.gate.until, store.gate.until)
+    verified.gate.check()
+    store = verified
     await hass.async_add_executor_job(
         client.configure_sync, store.state, store.on_change, store.gate
     )
     return client, store
 
 
-async def async_remove_sync_store(hass: HomeAssistant, email: str) -> None:
+async def async_remove_sync_store(
+    hass: HomeAssistant, email: str, *, account_id: str | None = None
+) -> None:
     """Remove account contents while retaining an unexpired server cooldown."""
-    store = await async_get_sync_store(hass, email)
+    store = await async_get_sync_store(hass, email, account_id=account_id)
     if store.gate.until > time.time():
         await store.async_save({"version": 1, "resources": {}})
     else:

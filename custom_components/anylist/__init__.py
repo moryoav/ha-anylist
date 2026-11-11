@@ -1218,7 +1218,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     password = entry.data[CONF_PASSWORD]
 
     try:
-        client, sync_store = await async_create_client(hass, email, password)
+        client, sync_store = await async_create_client(
+            hass, email, password, account_id=entry.unique_id
+        )
     except Exception as err:
         if _is_auth_error(err):
             raise ConfigEntryAuthFailed("AnyList authentication failed") from err
@@ -1356,4 +1358,4 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Remove saved account data after the integration is deleted."""
-    await async_remove_sync_store(hass, entry.data[CONF_EMAIL])
+    await async_remove_sync_store(hass, entry.data[CONF_EMAIL], account_id=entry.unique_id)

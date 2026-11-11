@@ -65,7 +65,9 @@ Raw protobuf snapshots are retained so fields unknown to this version survive
 later updates. Cached account data and its derived cursors are stored together
 using Home Assistant's private atomic storage. Authentication tokens and
 passwords are excluded. On restart, every restored resource revalidates before
-its snapshot is considered current.
+its snapshot is considered current. Storage belongs to the verified AnyList
+user ID, so changing the account email retains its cache and cooldown. Removing
+the integration clears that account's snapshots.
 
 ## Rate limits and diagnostics
 
@@ -79,6 +81,10 @@ The account cooldown applies to polls, manual refreshes, actions, calendar
 requests, and token renewal. Configuration and setup check the saved deadline
 before attempting login. A server restriction is not treated as a bad password.
 No mutation rejected during a cooldown is queued for automatic replay.
+Login rechecks the gate inside its executor worker and records a late 429 even
+if its caller has timed out. Queued actions carry the caller's deadline and
+cancellation state, preventing new requests after timeout or cancellation. A failed
+cooldown save is logged while the original 429 and in-memory gate are retained.
 
 Diagnostics include request count, response-body bytes, no-change responses,
 cache hits, per-resource snapshot sizes, dirty flags, and the retry deadline.

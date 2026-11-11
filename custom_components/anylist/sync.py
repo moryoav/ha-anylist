@@ -11,6 +11,7 @@ import base64
 import binascii
 from collections.abc import Callable
 from dataclasses import dataclass
+import logging
 import math
 import struct
 import threading
@@ -20,6 +21,7 @@ from typing import Any
 from .client import (
     AnyListError,
     AnyListHTTPError,
+    _check_operation_deadline,
     _encode_varint,
     _field_double,
     _field_key,
@@ -34,6 +36,7 @@ from .client import (
 
 SECONDARY_REFRESH_INTERVAL = 300
 _MAX_CACHED_BYTES = 24 * 1024 * 1024
+_LOGGER = logging.getLogger(__name__)
 _RESOURCES = {
     "lists": "/data/shopping-lists/all",
     "recipes": "/data/user-recipe-data/all",
@@ -137,7 +140,9 @@ def _merge_group(old: bytes, container: bytes) -> bytes:
     if not isinstance(incoming, bytes):
         raise AnyListError("Missing AnyList category group")
     _identifier(incoming)
-    fields = _replace(old, incoming, {5})
+    # Group scalars are an authoritative replacement, while categories have
+    # their own delta. An omitted defaultCategoryId explicitly clears it.
+    fields = _parse_fields(incoming)
     categories = _records(_parse_fields(old), 5)
     for deleted in _messages(response, 2):
         categories.pop(deleted.decode("utf-8"), None)
@@ -341,6 +346,16 @@ class SyncGate:
                 retry_after=math.ceil(remaining),
             )
 
+    def record_rate_limit(
+        self, error: AnyListHTTPError, persist: Callable[[], None]
+    ) -> None:
+        """Retain the server error if saving its deadline fails under the gate."""
+        self.until = max(self.until, time.time() + (error.retry_after or 3600))
+        try:
+            persist()
+        except Exception:
+            _LOGGER.warning("Unable to persist AnyList sync cooldown", exc_info=True)
+
 
 @dataclass
 class Resource:
@@ -368,6 +383,7 @@ class AnyListSync:
 
     def check(self) -> None:
         """Apply the cooldown even to cached reads and to an unloaded client."""
+        _check_operation_deadline()
         if self.client._closed:
             raise AnyListError("AnyList client has been unloaded")
         self.gate.check()
@@ -383,10 +399,9 @@ class AnyListSync:
                 return data
             except AnyListHTTPError as err:
                 if err.status == 429:
-                    self.gate.until = max(
-                        self.gate.until, time.time() + (err.retry_after or 3600)
+                    self.gate.record_rate_limit(
+                        err, lambda: self.changed(immediate=True)
                     )
-                    self.changed(immediate=True)
                 elif err.status == 304:
                     self.not_modified += 1
                 raise

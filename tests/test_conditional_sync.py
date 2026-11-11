@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from email import policy
 from email.utils import formatdate
@@ -300,6 +301,37 @@ def test_metadata_delta_deletes_categories_and_preserves_group_fields(monkeypatc
     assert lists[0].category_sets[0].name == "Supermarket"
     assert b"opaque group" in client._sync.resources["lists"].data
     assert b"opaque category" in client._sync.resources["lists"].data
+
+
+def test_cleared_default_category_survives_304_and_restart(monkeypatch):
+    """Omitting the default in a replacement group must clear the old value."""
+    original = wire._field_message(1, raw_list()) + wire._field_message(
+        6,
+        metadata(
+            wire._field_message(1, group(category()) + wire._field_string(8, "dairy")),
+            full=True,
+        ),
+    )
+    cleared = wire._field_message(6, metadata(wire._field_message(1, group()), clock=2))
+    server = HttpQueue(
+        monkeypatch,
+        [
+            ("/data/shopping-lists/all", 200, original),
+            ("/data/shopping-lists/all", 200, cleared),
+            ("/data/shopping-lists/all", 304, b""),
+            ("/data/shopping-lists/all", 304, b""),
+        ],
+    )
+    client = real_client()
+    assert client.get_lists()[0].category_sets[0].default_category_id == "dairy"
+    for _ in range(2):
+        shopping_list = client.get_lists()[0]
+        assert not shopping_list.category_sets[0].default_category_id
+        assert [value.id for value in shopping_list.categories] == ["dairy"]
+    restored = real_client()
+    restored._sync.restore(client.export_sync_state())
+    assert not restored.get_lists()[0].category_sets[0].default_category_id
+    assert not server.responses
 
 
 def test_full_metadata_sync_and_list_deletions_are_authoritative(monkeypatch):
@@ -692,6 +724,92 @@ def test_overlapping_list_reads_share_one_http_request(monkeypatch):
         assert second_started.wait(3)
         release.set()
         assert first.result(timeout=3) == second.result(timeout=3)
+    assert len(server.calls) == 1
+
+
+@pytest.mark.parametrize("cancel", [False, True])
+async def test_abandoned_queued_mutation_never_starts(hass, monkeypatch, cancel):
+    """A timed-out or cancelled action must not send a delayed cloud write."""
+    client = real_client()
+    server = HttpQueue(monkeypatch, [])
+    entered, release = threading.Event(), threading.Event()
+    started, finished = threading.Event(), threading.Event()
+
+    def hold_gate():
+        with client._sync.gate.lock:
+            entered.set()
+            assert release.wait(3)
+
+    def mutate():
+        started.set()
+        try:
+            return client.add_item("groceries", "Bread")
+        finally:
+            finished.set()
+
+    blocker = hass.async_add_executor_job(hold_gate)
+    assert await hass.async_add_executor_job(entered.wait, 3)
+    task = asyncio.create_task(
+        wire.async_call_with_timeout(hass, mutate, timeout=3 if cancel else 0.1)
+    )
+    try:
+        assert await hass.async_add_executor_job(started.wait, 3)
+        if cancel:
+            task.cancel()
+        with pytest.raises(
+            asyncio.CancelledError if cancel else wire.AnyListTimeoutError
+        ):
+            await task
+    finally:
+        release.set()
+        await blocker
+    assert await hass.async_add_executor_job(finished.wait, 3)
+    assert not server.calls
+
+
+async def test_expired_executor_job_does_not_start_its_operation(hass, monkeypatch):
+    """Time spent in the executor queue belongs to the caller's time budget."""
+    pending = []
+
+    class DeferredExecutor:
+        def async_add_executor_job(self, func):
+            pending.append(func)
+            return asyncio.get_running_loop().create_future()
+
+    client = real_client()
+    server = HttpQueue(monkeypatch, [])
+    with pytest.raises(wire.AnyListTimeoutError):
+        await wire.async_call_with_timeout(
+            DeferredExecutor(),
+            lambda: client.add_item("groceries", "Bread"),
+            timeout=0.01,
+        )
+    with pytest.raises(wire.AnyListTimeoutError):
+        await hass.async_add_executor_job(pending[0])
+    assert not server.calls
+
+
+@pytest.mark.parametrize(
+    "failure", [TimeoutError("save timeout"), OSError("disk full")]
+)
+def test_cooldown_save_failure_keeps_the_server_error(monkeypatch, caplog, failure):
+    """Persistence failure must not hide the 429 or reopen the account gate."""
+    client = real_client()
+
+    def fail_save(*args):
+        raise failure
+
+    client._sync.on_change = fail_save
+    server = HttpQueue(
+        monkeypatch, [("/data/shopping-lists/all", 429, b'{"retry_after":90}')]
+    )
+    with pytest.raises(wire.AnyListHTTPError) as error:
+        client.get_lists()
+    assert error.value.status == 429
+    assert error.value.retry_after == 90
+    assert "Unable to persist AnyList sync cooldown" in caplog.text
+    with pytest.raises(wire.AnyListHTTPError):
+        client.get_recipes()
     assert len(server.calls) == 1
 
 
