@@ -1608,8 +1608,7 @@ class AnyListClient:
             list_id, name, None, None, None, None, at_top
         )
 
-    @_serialized
-    def add_item_with_details(
+    def _build_item_add(
         self,
         list_id: str,
         name: str,
@@ -1618,13 +1617,8 @@ class AnyListClient:
         category: str | None = None,
         category_assignment: ItemCategoryAssignment | None = None,
         at_top: bool = False,
-    ) -> ListItem:
-        """Add an item to a shopping list with optional details.
-
-        AnyList appends new items unless the operation says otherwise. The apps
-        apply a list's "Insert New Items: At Top" setting by attaching the
-        position to each add operation, so at_top does the same.
-        """
+    ) -> tuple[bytes, ListItem]:
+        """Build one add operation and its item without sending a request."""
         category_match_id = (
             category_assignment.category_match_id if category_assignment else category
         )
@@ -1655,8 +1649,7 @@ class AnyListClient:
                 else None
             ),
         )
-        self.post("data/shopping-lists/update", _pb_list_operation_list([operation]))
-        return ListItem(
+        return operation, ListItem(
             id=item_id,
             list_id=list_id,
             name=name,
@@ -1668,6 +1661,24 @@ class AnyListClient:
             user_id=self._user_id,
             category_assignments=[category_assignment] if category_assignment else [],
         )
+
+    @_serialized
+    def add_item_with_details(
+        self,
+        list_id: str,
+        name: str,
+        quantity: str | None = None,
+        details: str | None = None,
+        category: str | None = None,
+        category_assignment: ItemCategoryAssignment | None = None,
+        at_top: bool = False,
+    ) -> ListItem:
+        """Add an item with details and the list's requested insertion position."""
+        operation, item = self._build_item_add(
+            list_id, name, quantity, details, category, category_assignment, at_top
+        )
+        self.post("data/shopping-lists/update", _pb_list_operation_list([operation]))
+        return item
 
     def add_item_to_category(
         self,
@@ -2217,20 +2228,22 @@ class AnyListClient:
         ingredients = [item for item in recipe.ingredients if not item.is_heading]
         if at_top:
             ingredients.reverse()
+        operations = []
         for ingredient in ingredients:
             quantity = ingredient.quantity
             if quantity is not None and scale_factor is not None:
                 quantity = _scale_quantity(quantity, scale_factor)
 
-            self.add_item_with_details(
+            operation, _ = self._build_item_add(
                 list_id,
                 ingredient.name,
                 quantity,
                 ingredient.note,
-                None,
-                None,
-                at_top,
+                at_top=at_top,
             )
+            operations.append(operation)
+        if operations:
+            self.post("data/shopping-lists/update", _pb_list_operation_list(operations))
 
     def get_icalendar_info(self) -> ICalendarInfo:
         """Read the existing calendar export without changing sharing settings."""

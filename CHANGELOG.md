@@ -20,6 +20,8 @@
   resource instead of retaining unusable cursors across polls and restarts.
 - Retain timestamps for unnamed lists while skipping them from visible lists,
   so they cannot interrupt syncing or cause repeated full downloads.
+- Send recipe ingredients in one shopping-list update, preserving ingredient
+  order, quantities and notes without a timeout between individual writes.
 
 ## 0.12.0 - 2026-11-02
 

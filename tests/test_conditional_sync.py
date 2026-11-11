@@ -532,6 +532,67 @@ def test_recipe_search_then_detail_and_collection_reads_share_one_fetch(monkeypa
     assert len(server.calls) == 1
 
 
+@pytest.mark.parametrize("at_top", [False, True])
+def test_recipe_ingredients_are_sent_in_one_request(monkeypatch, at_top):
+    """A large recipe must not be split into separately timed ingredient writes."""
+    ingredients = [wire.Ingredient(name="Section", is_heading=True)] + [
+        wire.Ingredient(name=f"Ingredient {number}", quantity="2 kg", note="diced")
+        for number in range(20)
+    ]
+    raw_recipe = recipe() + b"".join(
+        wire._field_message(8, wire._pb_ingredient(value)) for value in ingredients
+    )
+    recipe_data = (
+        wire._field_double(1, 1)
+        + wire._field_message(3, raw_recipe)
+        + wire._field_string(9, "recipe-data")
+    )
+    lists = wire._field_message(
+        1, raw_list(items=[]) + wire._field_int32(18, 1 if at_top else 0)
+    )
+    server = HttpQueue(
+        monkeypatch,
+        [
+            ("/data/user-recipe-data/all", 200, recipe_data),
+            ("/data/shopping-lists/all", 200, lists),
+            ("/data/shopping-lists/update", 200, b""),
+        ],
+    )
+    real_client().add_recipe_to_list("soup", "groceries", scale_factor=0.5)
+    assert len(server.calls) == 3
+    operations = wire._all_values(
+        wire._parse_fields(server.calls[-1][1]["operations"]), 1
+    )
+    fields = [wire._parse_fields(value) for value in operations]
+    items = [wire._parse_list_item(wire._first_value(value, 6)) for value in fields]
+    expected = [value.name for value in ingredients[1:]]
+    assert [value.name for value in items] == (expected[::-1] if at_top else expected)
+    assert len({value.id for value in items}) == 20
+    assert {(value.quantity, value.details) for value in items} == {("1 kg", "diced")}
+    assert {
+        wire._first_int(wire._parse_fields(wire._first_value(value, 7) or b""), 18)
+        for value in fields
+    } == {1 if at_top else None}
+    assert not server.responses
+
+
+def test_recipe_with_only_headings_sends_no_empty_write(monkeypatch):
+    """A recipe without shopping ingredients needs no mutation request."""
+    raw_recipe = recipe() + wire._field_message(
+        8, wire._pb_ingredient(wire.Ingredient(name="Section", is_heading=True))
+    )
+    server = HttpQueue(
+        monkeypatch,
+        [
+            ("/data/user-recipe-data/all", 200, wire._field_message(3, raw_recipe)),
+            ("/data/shopping-lists/all", 200, initial_lists()),
+        ],
+    )
+    real_client().add_recipe_to_list("soup", "groceries")
+    assert len(server.calls) == 2
+    assert not server.responses
+
+
 def test_recipe_delta_replaces_changed_records_and_prunes_deleted_memberships(
     monkeypatch,
 ):

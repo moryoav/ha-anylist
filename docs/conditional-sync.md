@@ -66,6 +66,10 @@ Writes mark the affected cache dirty before the request, including when its
 outcome could be ambiguous. Shopping-list actions still await immediate
 conditional readback, preserving consecutive add/check/delete behavior.
 Metadata-preserving recipe edits revalidate before building their write payload.
+Adding a recipe sends all non-heading ingredients in one operations request,
+preserving scaling, notes, and insertion order. A deadline cannot interrupt it
+between separate ingredient writes. An already sent request can still have an
+unknown outcome after a network timeout.
 `anylist.refresh` makes loaded secondary caches revalidate on their next read.
 
 Raw protobuf snapshots are retained so fields unknown to this version survive
