@@ -69,7 +69,7 @@ def _data(
 def _read_client(data=None):
     """Create an authenticated client with mocked snapshot reads and writes."""
     client = _client()
-    client.get_user_data = Mock(return_value=_data() if data is None else data)
+    client.read_snapshot = Mock(return_value=_data() if data is None else data)
     client.post = Mock()
     return client
 
@@ -82,11 +82,11 @@ def test_collection_catalog_and_memberships_use_native_order():
         ("cocktails", ["martini"]),
         ("holiday", ["martini", "pasta"]),
     ]
-    client.get_user_data.reset_mock()
+    client.read_snapshot.reset_mock()
     recipes = client.get_recipes()
     assert [value.id for value in recipes[0].collections] == ["cocktails", "holiday"]
     assert [value.id for value in recipes[1].collections] == ["holiday"]
-    client.get_user_data.assert_called_once_with()
+    client.read_snapshot.assert_called_once_with()
 
 
 def test_missing_collection_data_is_backward_compatible():
@@ -94,7 +94,7 @@ def test_missing_collection_data_is_backward_compatible():
     client = _read_client(_data(collections=[]))
     assert client.get_collections() == []
     assert all(value.collections == [] for value in client.get_recipes())
-    client.get_user_data.return_value = b""
+    client.read_snapshot.return_value = b""
     assert client.get_collections() == []
     assert client.get_recipes() == []
 
@@ -128,7 +128,7 @@ def test_client_collection_filters_use_one_snapshot(selection, expected):
     """Resolve collection names and IDs before selecting recipe IDs."""
     client = _read_client()
     assert [value.id for value in client.get_recipes(**selection)] == expected
-    client.get_user_data.assert_called_once_with()
+    client.read_snapshot.assert_called_once_with()
 
 
 @pytest.mark.parametrize(
@@ -171,7 +171,7 @@ def test_membership_delta_preserves_metadata_and_confirms_saved_state(add):
     after_ids = ("martini", "pasta", "concurrent") if add else ("martini", "concurrent")
     original = _collection(recipe_ids=before_ids)
     client = _read_client()
-    client.get_user_data.side_effect = [
+    client.read_snapshot.side_effect = [
         _data([original]),
         _data([_collection(recipe_ids=after_ids)]),
     ]
@@ -195,7 +195,7 @@ def test_membership_delta_preserves_metadata_and_confirms_saved_state(add):
     assert {key: value for key, value in collection.items() if key != 4} == {
         key: value for key, value in wire._parse_fields(original).items() if key != 4
     }
-    assert client.get_user_data.call_count == 2
+    assert client.read_snapshot.call_count == 2
     client.post.assert_called_once()
 
 
@@ -208,7 +208,7 @@ def test_satisfied_membership_does_not_write(add):
     )
     change("martini", "cocktails")
     client.post.assert_not_called()
-    client.get_user_data.assert_called_once_with()
+    client.read_snapshot.assert_called_once_with()
 
 
 @pytest.mark.parametrize("add", [True, False])
@@ -217,7 +217,7 @@ def test_unconfirmed_memberships_raise_after_fresh_read(add, deleted):
     """Fail confirmation if the collection disappears or membership is unchanged."""
     before = _data([_collection(recipe_ids=() if add else ("martini",))])
     client = _read_client()
-    client.get_user_data.side_effect = [before, _data([]) if deleted else before]
+    client.read_snapshot.side_effect = [before, _data([]) if deleted else before]
     change = (
         client.add_recipe_to_collection if add else client.remove_recipe_from_collection
     )
@@ -248,7 +248,7 @@ def test_failed_confirmation_read_reports_an_uncertain_update(add):
     """Report failed readback as an unconfirmed update and retain its cause."""
     client = _read_client()
     failure = wire.AnyListTimeoutError("timeout")
-    client.get_user_data.side_effect = [
+    client.read_snapshot.side_effect = [
         _data([_collection(recipe_ids=() if add else ("martini",))]),
         failure,
     ]
@@ -271,7 +271,7 @@ def test_failed_write_is_not_retried_or_reported_as_confirmed():
         client.add_recipe_to_collection("pasta", "cocktails")
     assert error.value is failure
     client.post.assert_called_once()
-    client.get_user_data.assert_called_once_with()
+    client.read_snapshot.assert_called_once_with()
 
 
 async def _setup(hass):
@@ -319,7 +319,7 @@ async def test_service_collection_filters_precede_query_and_limit(hass, action):
     """Filter before matching and limits, and distinguish empty and missing sets."""
     client, _ = await _setup(hass)
     # The alphabetically first exact match is outside the selected collection.
-    client.get_user_data.return_value = _data(
+    client.read_snapshot.return_value = _data(
         [_collection(recipe_ids=("pasta",)), _collection("empty", "Empty", ())],
         recipes=(("martini", "Pasta"), ("pasta", "Pasta")),
     )
@@ -346,7 +346,7 @@ async def test_membership_services_return_confirmed_collection(hass, action, res
     """Return confirmed collection data only when the caller requests a response."""
     client, _ = await _setup(hass)
     add = action == "add_recipe_to_collection"
-    client.get_user_data.side_effect = [
+    client.read_snapshot.side_effect = [
         _data([_collection(recipe_ids=() if add else ("martini",))]),
         _data([_collection(recipe_ids=("martini",) if add else ())]),
     ]
@@ -387,7 +387,7 @@ async def test_invalid_service_schemas_do_not_fetch_or_write(hass, action, data)
     client, _ = await _setup(hass)
     with pytest.raises(vol.Invalid):
         await _call(hass, action, data)
-    client.get_user_data.assert_not_called()
+    client.read_snapshot.assert_not_called()
     client.post.assert_not_called()
 
 
@@ -397,7 +397,7 @@ async def test_missing_collection_selector_rejected_before_retrieval(hass):
     with pytest.raises(HomeAssistantError) as error:
         await _call(hass, "add_recipe_to_collection", {"recipe_id": "martini"})
     assert error.value.translation_key == "exactly_one_field"
-    client.get_user_data.assert_not_called()
+    client.read_snapshot.assert_not_called()
     client.post.assert_not_called()
 
 
@@ -405,7 +405,7 @@ async def test_collection_services_keep_accounts_separate(hass):
     """Use the selected account and reject implicit selection across accounts."""
     first, _ = await _setup(hass)
     second, entry = await _setup(hass)
-    second.get_user_data.return_value = _data([])
+    second.read_snapshot.return_value = _data([])
     with pytest.raises(HomeAssistantError) as error:
         await _call(hass, "get_collections")
     assert error.value.translation_key == "multiple_entries"
@@ -422,7 +422,7 @@ async def test_collection_services_keep_accounts_separate(hass):
                 "collection_id": "cocktails",
             },
         )
-    first.get_user_data.assert_not_called()
+    first.read_snapshot.assert_not_called()
     first.post.assert_not_called()
     second.post.assert_not_called()
 
@@ -447,7 +447,7 @@ async def test_collection_service_errors_are_translated(
 ):
     """Translate retrieval and update failures while preserving their causes."""
     client, _ = await _setup(hass)
-    client.get_user_data.side_effect = failure
+    client.read_snapshot.side_effect = failure
     with pytest.raises(HomeAssistantError) as error:
         await _call(hass, action, data)
     assert error.value.translation_key == key

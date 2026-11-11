@@ -18,10 +18,16 @@ def stub_snapshot_reads(client) -> None:
     Parser and operation tests supply complete PBUserDataResponse fixtures. The
     conditional-sync tests instead exercise the real resource and HTTP paths.
     """
+    def missing_snapshot():
+        """Require an explicit synthetic provider whenever a test reads data."""
+        raise AssertionError("Missing synthetic snapshot fixture")
+
+    client.read_snapshot = missing_snapshot
+
     def read_resource(name, **kwargs):
         """Read the requested section from the test's current synthetic data."""
         number = {"lists": 1, "recipes": 3, "favourites": 7, "settings": 9}[name]
-        return wire._first_value(wire._parse_fields(client.get_user_data()), number) or b""
+        return wire._first_value(wire._parse_fields(client.read_snapshot()), number) or b""
 
     client._read_resource = read_resource
 

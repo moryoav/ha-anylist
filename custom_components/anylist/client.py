@@ -2275,10 +2275,6 @@ class AnyListClient:
             raise AnyListError("AnyList returned no calendar ID after enabling export")
         return info
 
-    def get_user_data(self) -> bytes:
-        """Get raw user data from AnyList."""
-        return self.post("data/user-data/get", b"")
-
     def post(self, endpoint: str, body: bytes) -> bytes:
         """Post an AnyList operations request."""
         return self.post_multipart(f"/{endpoint}", "operations", body)

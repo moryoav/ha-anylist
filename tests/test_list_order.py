@@ -155,7 +155,7 @@ def _capturing_client(user_data: bytes = b"") -> tuple[client_module.AnyListClie
     stub_snapshot_reads(client)
     captured: list[bytes] = []
     client.post = lambda path, body: captured.append(body)
-    client.get_user_data = lambda: user_data
+    client.read_snapshot = lambda: user_data
     return client, captured
 
 

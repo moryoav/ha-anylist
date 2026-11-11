@@ -124,7 +124,7 @@ class RecipeServer:
         """Return a PBRecipe's identifier."""
         return client_module._first_string(_parse_fields(recipe), 1)
 
-    def get_user_data(self) -> bytes:
+    def read_snapshot(self) -> bytes:
         """Return the current recipes as user data."""
         return _user_data(*self.recipes.values())
 
@@ -140,7 +140,7 @@ class RecipeServer:
 def _server_client(server: RecipeServer) -> client_module.AnyListClient:
     """Return a real client that reads from and saves to the fake server."""
     client = _client()
-    client.get_user_data = server.get_user_data
+    client.read_snapshot = server.read_snapshot
     client.post = server.post
     return client
 
@@ -161,7 +161,7 @@ async def _setup(hass: HomeAssistant, client: object) -> None:
 def test_headings_parse_in_place_with_stored_ids() -> None:
     """Headings stay in ingredient order, flagged, with AnyList's own IDs."""
     client = _client()
-    client.get_user_data = lambda: _user_data(_recipe())
+    client.read_snapshot = lambda: _user_data(_recipe())
 
     recipe = client.get_recipe_by_id(RECIPE_ID)
 
@@ -183,7 +183,7 @@ def test_headings_parse_in_place_with_stored_ids() -> None:
 def test_nameless_entries_are_skipped() -> None:
     """Entries without a name are skipped, headings included."""
     client = _client()
-    client.get_user_data = lambda: _user_data(
+    client.read_snapshot = lambda: _user_data(
         _recipe(
             (
                 _entry(None, identifier="blank-heading", heading=True),
@@ -285,7 +285,7 @@ def test_add_recipe_to_list_skips_headings(
         + _field_int32(18, position)
     )
     lists = _field_message(1, _field_message(1, shopping_list))
-    client.get_user_data = lambda: lists + _user_data(_recipe())
+    client.read_snapshot = lambda: lists + _user_data(_recipe())
     captured = []
     client.post = lambda path, body: captured.append((path, body))
 
@@ -311,7 +311,7 @@ def test_add_recipe_to_list_skips_headings(
 def test_search_does_not_match_heading_words() -> None:
     """Ingredient search matches ingredient names, not heading text."""
     client = _client()
-    client.get_user_data = lambda: _user_data(_recipe())
+    client.read_snapshot = lambda: _user_data(_recipe())
     recipes = client.get_recipes()
 
     assert search_recipes(recipes, "sauce", include_ingredients=True)["count"] == 0

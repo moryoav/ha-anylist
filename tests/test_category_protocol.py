@@ -121,7 +121,7 @@ def original_item() -> bytes:
 def test_parser_preserves_sets_order_defaults_and_all_assignments():
     """Read every set and assignment instead of flattening their identities."""
     client = authenticated_client()
-    client.get_user_data = lambda: user_data(original_item())
+    client.read_snapshot = lambda: user_data(original_item())
     [shopping_list] = client.get_lists()
     assert [
         (value.id, value.name, value.default_category_id)
@@ -251,7 +251,7 @@ def test_category_update_preserves_other_sets_and_every_other_field(with_details
     """Send the native operation without resetting checked state or metadata."""
     client = authenticated_client()
     original = original_item()
-    client.get_user_data = lambda: user_data(original)
+    client.read_snapshot = lambda: user_data(original)
     requests = []
     client.post = lambda endpoint, payload: requests.append((endpoint, payload))
     category = api.ListCategory("north-tools", "list-a", "north", "Tools", "tools")
@@ -285,7 +285,7 @@ def test_assignment_is_appended_when_missing_and_foreign_categories_are_rejected
     """Handle first assignments while preventing any cross-list client write."""
     client = authenticated_client()
     original = api._field_string(1, "item-a") + api._field_string(4, "Item")
-    client.get_user_data = lambda: user_data(original)
+    client.read_snapshot = lambda: user_data(original)
     requests = []
     client.post = lambda endpoint, payload: requests.append((endpoint, payload))
     category = api.ListCategory("north-tools", "list-a", "north", "Tools", "tools")

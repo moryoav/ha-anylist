@@ -120,7 +120,7 @@ def test_local_client_parses_shopping_list_response():
         client_identifier="client1",
     )
     stub_snapshot_reads(client)
-    client.get_user_data = lambda: user_data
+    client.read_snapshot = lambda: user_data
 
     lists = client.get_lists()
 
@@ -356,7 +356,7 @@ def test_local_client_parses_category_assignments():
         client_identifier="client1",
     )
     stub_snapshot_reads(client)
-    client.get_user_data = lambda: user_data
+    client.read_snapshot = lambda: user_data
 
     lists = client.get_lists()
 
