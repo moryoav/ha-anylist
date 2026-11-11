@@ -9,7 +9,9 @@ from unittest.mock import patch
 
 import pytest
 
+from homeassistant.config_entries import SOURCE_USER
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD, STATE_UNAVAILABLE
+from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.exceptions import HomeAssistantError
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -271,6 +273,66 @@ async def test_removal_deletes_cached_contents_but_keeps_an_active_ban(hass):
     store.gate.until = 0
     await async_remove_sync_store(hass, "user@example.com")
     assert await store.store.async_load() is None
+
+
+async def test_abandoned_setup_never_persists_its_list_snapshot(hass, monkeypatch):
+    """Cancelling the list picker must leave no private list data on disk."""
+    client = real_client()
+    server = HttpQueue(
+        monkeypatch, [("/data/shopping-lists/all", 200, initial_lists())]
+    )
+    with patch(
+        "custom_components.anylist.client.AnyListClient.login", return_value=client
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": SOURCE_USER},
+            data={CONF_EMAIL: "user@example.com", CONF_PASSWORD: "secret"},
+        )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "select_lists"
+    assert client._sync.resources["lists"].data
+    hass.config_entries.flow.async_abort(result["flow_id"])
+    await hass.async_block_till_done()
+    assert not hass.config_entries.async_entries(DOMAIN)
+    store = await async_get_sync_store(hass, "user@example.com")
+    assert await store.store.async_load() is None
+    hass.data.pop("anylist_sync_stores")
+    restored = await async_get_sync_store(hass, "user@example.com")
+    assert not restored.state.get("resources")
+    assert not server.responses
+
+
+async def test_validation_only_client_persists_cooldown_without_cached_lists(
+    hass, monkeypatch
+):
+    """A validation client retains its ban without saving previously read data."""
+    server = HttpQueue(
+        monkeypatch,
+        [
+            ("/data/shopping-lists/all", 200, initial_lists()),
+            ("/data/user-recipe-data/all", 429, b'{"retry_after":3600}'),
+        ],
+    )
+    with patch(
+        "custom_components.anylist.client.AnyListClient.login",
+        return_value=real_client(),
+    ):
+        client, store = await async_create_client(
+            hass, "user@example.com", "secret", persist_snapshots=False
+        )
+    await wire.async_call_with_timeout(hass, client.get_lists)
+    with pytest.raises(wire.AnyListHTTPError):
+        await wire.async_call_with_timeout(hass, client.get_recipes)
+    saved = await store.store.async_load()
+    assert not saved.get("resources")
+    assert saved["cooldown_until"] > wire.time.time() + 3590
+    hass.data.pop("anylist_sync_stores")
+    with patch("custom_components.anylist.client.AnyListClient.login") as login:
+        with pytest.raises(wire.AnyListHTTPError):
+            await async_create_client(hass, "user@example.com", "secret")
+        login.assert_not_called()
+    assert not server.responses
 
 
 async def _setup_real_client(hass, client):

@@ -81,6 +81,9 @@ user ID, so changing the account email retains its cache and cooldown. Removing
 the integration clears that account's snapshots. A private lookup between hashed
 email and account keys retains cooldown discovery before login, including after
 unfinished setup or removal. The lookup contains no email address or snapshots.
+Credential-validation clients keep newly fetched snapshots in memory. Cancelling
+setup does not leave those account contents on disk; rate-limit deadlines still
+persist. A configured integration saves snapshots through its normal client.
 
 ## Rate limits and diagnostics
 

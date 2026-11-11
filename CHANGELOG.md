@@ -22,6 +22,8 @@
   so they cannot interrupt syncing or cause repeated full downloads.
 - Send recipe ingredients in one shopping-list update, preserving ingredient
   order, quantities and notes without a timeout between individual writes.
+- Keep credential-validation snapshots in memory until the integration is
+  configured, so abandoning setup leaves no cached list contents on disk.
 
 ## 0.12.0 - 2026-11-02
 

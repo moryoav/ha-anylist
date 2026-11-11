@@ -137,7 +137,12 @@ async def async_get_sync_store(
 
 
 async def async_create_client(
-    hass: HomeAssistant, email: str, password: str, *, account_id: str | None = None
+    hass: HomeAssistant,
+    email: str,
+    password: str,
+    *,
+    account_id: str | None = None,
+    persist_snapshots: bool = True,
 ) -> tuple[AnyListClient, AnyListSyncStore]:
     """Check a persisted ban before login, then restore the account's snapshots."""
     store = await async_get_sync_store(hass, email, account_id=account_id)
@@ -174,8 +179,16 @@ async def async_create_client(
     await alias.async_save({"account_key": verified.key})
     verified.gate.check()
     store = verified
+
+    def on_change(state: dict[str, Any], immediate: bool) -> None:
+        """Keep validation-only snapshots volatile while persisting any ban."""
+        if persist_snapshots:
+            store.on_change(state, immediate)
+        elif immediate:
+            store.on_change(store.state, True)
+
     await hass.async_add_executor_job(
-        client.configure_sync, store.state, store.on_change, store.gate
+        client.configure_sync, store.state, on_change, store.gate
     )
     return client, store
 

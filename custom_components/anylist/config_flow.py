@@ -93,7 +93,9 @@ async def _async_validate_credentials(
 ) -> tuple[str, AnyListClient, list[tuple[str, str]]]:
     """Validate credentials and return account information."""
     try:
-        client, _ = await async_create_client(hass, email, password, account_id=account_id)
+        client, _ = await async_create_client(
+            hass, email, password, account_id=account_id, persist_snapshots=False
+        )
         lists = await async_call_with_timeout(
             hass,
             client.get_lists,
