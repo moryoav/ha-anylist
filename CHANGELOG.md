@@ -25,6 +25,8 @@
 - Keep credential-validation snapshots in memory until the integration is
   configured, so abandoning setup leaves no cached list contents on disk.
 - Remove the unused full-account download method from the bundled client.
+- Log rejected sync responses and recovery attempts so repeated full fetches
+  are visible in Home Assistant logs without exposing account contents.
 
 ## 0.12.0 - 2026-11-02
 

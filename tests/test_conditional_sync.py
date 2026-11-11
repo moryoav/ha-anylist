@@ -320,7 +320,9 @@ def test_modified_list_retains_other_lists_and_unchanged_categories(monkeypatch)
     assert [item.id for item in lists[0].categories] == ["dairy", "other"]
 
 
-def test_rejected_delta_recovers_only_its_resource_without_stale_cursors(monkeypatch):
+def test_rejected_delta_recovers_only_its_resource_without_stale_cursors(
+    monkeypatch, caplog
+):
     """A backwards cursor must recover with one full resource read."""
     stale = wire._field_message(2, raw_list(timestamp=0, name="Recovered"))
     full = wire._field_message(1, raw_list(timestamp=0, name="Recovered"))
@@ -340,6 +342,10 @@ def test_rejected_delta_recovers_only_its_resource_without_stale_cursors(monkeyp
     states = []
     client._sync.on_change = lambda state, immediate: states.append(state)
     assert client.get_lists()[0].name == "Recovered"
+    assert (
+        "Rejected AnyList lists sync response; retrying once without cursors"
+        in caplog.messages
+    )
     assert server.calls[2][1]["timestamps"]
     assert server.calls[3][1] == {"timestamps": b"", "logical_timestamps": b""}
     assert any("lists" not in state["resources"] for state in states)
@@ -351,7 +357,9 @@ def test_rejected_delta_recovers_only_its_resource_without_stale_cursors(monkeyp
     assert not server.responses
 
 
-def test_failed_full_recovery_is_bounded_and_restart_can_fetch_again(monkeypatch):
+def test_failed_full_recovery_is_bounded_and_restart_can_fetch_again(
+    monkeypatch, caplog
+):
     """A second invalid response must stop and leave no poisoned cursor on disk."""
     server = HttpQueue(
         monkeypatch,
@@ -371,6 +379,9 @@ def test_failed_full_recovery_is_bounded_and_restart_can_fetch_again(monkeypatch
     with pytest.raises(wire.AnyListError):
         client.get_lists()
     assert len(server.calls) == 3
+    assert caplog.messages[-1] == (
+        "Rejected AnyList lists sync response; discarding the snapshot and stopping this refresh"
+    )
     assert "lists" not in client.export_sync_state()["resources"]
     restored = real_client()
     restored._sync.restore(client.export_sync_state())

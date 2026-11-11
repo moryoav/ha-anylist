@@ -438,6 +438,13 @@ class AnyListSync:
                 try:
                     merged = _MERGERS[name](resource.data or b"", data)
                 except (AnyListError, ValueError):
+                    _LOGGER.warning(
+                        "Rejected AnyList %s sync response; %s",
+                        name,
+                        "retrying once without cursors"
+                        if can_recover
+                        else "discarding the snapshot and stopping this refresh",
+                    )
                     # A rejected delta must not keep sending the same stale
                     # cursors forever. Retry this resource once without them.
                     resource.data = None

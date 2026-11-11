@@ -54,6 +54,9 @@ If an incremental response fails validation, its resource snapshot and cursors
 are discarded and one full resource fetch is attempted. A failed recovery
 stops that poll; the next poll or restart can fetch without the rejected cursor.
 Other resources retain their snapshots.
+Each rejection logs a warning naming the resource and whether it will retry
+without cursors or stop the refresh. Repeated recovery downloads are visible
+without logging account contents or the rejected payload.
 
 ## Freshness and persistence
 
