@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## 0.12.1 - 2026-11-11
+## 0.13.0 - 2026-11-11
 
 - Replace repeated full-account downloads with conditional shopping-list,
   recipe, favourite, and settings requests. Keep the 60-second shopping-list
