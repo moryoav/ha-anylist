@@ -16,6 +16,8 @@
   request counts and cache status in diagnostics. Keep account state when its
   email changes, retain cooldown checks after unfinished setup or removal, and
   prevent queued actions from starting after their timeout.
+- Recover rejected incremental updates with one full fetch of the affected
+  resource instead of retaining unusable cursors across polls and restarts.
 
 ## 0.12.0 - 2026-11-02
 

@@ -280,6 +280,65 @@ def test_modified_list_retains_other_lists_and_unchanged_categories(monkeypatch)
     assert [item.id for item in lists[0].categories] == ["dairy", "other"]
 
 
+def test_rejected_delta_recovers_only_its_resource_without_stale_cursors(monkeypatch):
+    """A backwards cursor must recover with one full resource read."""
+    stale = wire._field_message(2, raw_list(timestamp=0, name="Recovered"))
+    full = wire._field_message(1, raw_list(timestamp=0, name="Recovered"))
+    server = HttpQueue(
+        monkeypatch,
+        [
+            ("/data/shopping-lists/all", 200, initial_lists()),
+            ("/data/user-recipe-data/all", 200, initial_recipes()),
+            ("/data/shopping-lists/all", 200, stale),
+            ("/data/shopping-lists/all", 200, full),
+            ("/data/shopping-lists/all", 304, b""),
+        ],
+    )
+    client = real_client()
+    client.get_lists()
+    recipes = client.get_recipes()
+    states = []
+    client._sync.on_change = lambda state, immediate: states.append(state)
+    assert client.get_lists()[0].name == "Recovered"
+    assert server.calls[2][1]["timestamps"]
+    assert server.calls[3][1] == {"timestamps": b"", "logical_timestamps": b""}
+    assert any("lists" not in state["resources"] for state in states)
+    assert all("recipes" in state["resources"] for state in states)
+    assert client.get_recipes() == recipes
+    restored = real_client()
+    restored._sync.restore(client.export_sync_state())
+    assert restored.get_lists()[0].name == "Recovered"
+    assert not server.responses
+
+
+def test_failed_full_recovery_is_bounded_and_restart_can_fetch_again(monkeypatch):
+    """A second invalid response must stop and leave no poisoned cursor on disk."""
+    server = HttpQueue(
+        monkeypatch,
+        [
+            ("/data/shopping-lists/all", 200, initial_lists()),
+            (
+                "/data/shopping-lists/all",
+                200,
+                wire._field_message(2, raw_list(timestamp=0)),
+            ),
+            ("/data/shopping-lists/all", 200, b"\x0f"),
+            ("/data/shopping-lists/all", 200, initial_lists()),
+        ],
+    )
+    client = real_client()
+    client.get_lists()
+    with pytest.raises(wire.AnyListError):
+        client.get_lists()
+    assert len(server.calls) == 3
+    assert "lists" not in client.export_sync_state()["resources"]
+    restored = real_client()
+    restored._sync.restore(client.export_sync_state())
+    assert restored.get_lists()[0].name == "Groceries"
+    assert server.calls[-1][1] == {"timestamps": b"", "logical_timestamps": b""}
+    assert not server.responses
+
+
 def test_metadata_delta_deletes_categories_and_preserves_group_fields(monkeypatch):
     """A logical-only response updates categories without deleting list items."""
     container = wire._field_message(
@@ -387,25 +446,27 @@ def test_store_filter_rule_and_group_deletions_merge_independently(monkeypatch):
     assert all(number not in fields for number in (7, 8, 9, 10, 11, 12, 13, 14))
 
 
-def test_bad_delta_does_not_advance_data_or_cursors(monkeypatch):
-    """Malformed metadata must leave the prior coherent snapshot available."""
+def test_bad_delta_is_replaced_without_advancing_its_invalid_cursor(monkeypatch):
+    """Malformed metadata must recover from a coherent full server snapshot."""
+    original = initial_lists()
     malformed = wire._field_message(6, metadata(wire._field_message(1, b""), clock=2))
     server = HttpQueue(
         monkeypatch,
         [
-            ("/data/shopping-lists/all", 200, initial_lists()),
+            ("/data/shopping-lists/all", 200, original),
             ("/data/shopping-lists/all", 200, malformed),
+            ("/data/shopping-lists/all", 200, original),
             ("/data/shopping-lists/all", 304, b""),
         ],
     )
     client = real_client()
     before = client.get_lists()
     state = client.export_sync_state()
-    with pytest.raises(wire.AnyListError):
-        client.get_lists()
+    assert client.get_lists() == before
     assert client.export_sync_state() == state
     assert client.get_lists() == before
-    assert server.calls[1][1] == server.calls[2][1]
+    assert server.calls[2][1] == {"timestamps": b"", "logical_timestamps": b""}
+    assert server.calls[1][1] == server.calls[3][1]
 
 
 def test_304_without_a_snapshot_is_an_error(monkeypatch):

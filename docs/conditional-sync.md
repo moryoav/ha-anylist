@@ -48,6 +48,11 @@ before the new cursors are saved:
 - Favourites batches retain unchanged lists and apply explicit deletions or an
   authoritative full batch, including an empty batch.
 
+If an incremental response fails validation, its resource snapshot and cursors
+are discarded and one full resource fetch is attempted. A failed recovery
+stops that poll; the next poll or restart can fetch without the rejected cursor.
+Other resources retain their snapshots.
+
 ## Freshness and persistence
 
 Shopping-list reads revalidate with the server. Overlapping reads share an

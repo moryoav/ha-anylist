@@ -425,22 +425,36 @@ class AnyListSync:
                 self.cache_hits += 1
                 self._update_diagnostics()
                 return resource.data
-            files = self._parts(name, resource.data or b"")
-            try:
-                data = self.client.post_multipart(_RESOURCES[name], files=files)
-            except AnyListHTTPError as err:
-                if err.status != 304 or resource.data is None:
-                    raise
+            can_recover = resource.data is not None
+            while True:
+                files = self._parts(name, resource.data or b"")
+                try:
+                    data = self.client.post_multipart(_RESOURCES[name], files=files)
+                except AnyListHTTPError as err:
+                    if err.status != 304 or resource.data is None:
+                        raise
+                    resource.checked = time.monotonic()
+                    resource.dirty = False
+                    self._update_diagnostics()
+                    return resource.data
+                try:
+                    merged = _MERGERS[name](resource.data or b"", data)
+                except (AnyListError, ValueError):
+                    # A rejected delta must not keep sending the same stale
+                    # cursors forever. Retry this resource once without them.
+                    resource.data = None
+                    resource.checked = -math.inf
+                    resource.dirty = True
+                    self.changed()
+                    if not can_recover:
+                        raise
+                    can_recover = False
+                    continue
+                resource.data = merged
                 resource.checked = time.monotonic()
                 resource.dirty = False
-                self._update_diagnostics()
-                return resource.data
-            merged = _MERGERS[name](resource.data or b"", data)
-            resource.data = merged
-            resource.checked = time.monotonic()
-            resource.dirty = False
-            self.changed()
-            return merged
+                self.changed()
+                return merged
 
     def _parts(self, name: str, data: bytes) -> dict[str, bytes]:
         """Build the exact binary multipart parts used by the official client."""
