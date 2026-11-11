@@ -38,7 +38,6 @@ from .client import (
 )
 from .const import (
     ANYLIST_DEFAULT_POLL_INTERVAL,
-    ANYLIST_LOGIN_TIMEOUT,
     ANYLIST_MAX_POLL_INTERVAL,
     ANYLIST_MIN_POLL_INTERVAL,
     ANYLIST_PHOTO_TIMEOUT,
@@ -100,6 +99,11 @@ from .recipe_search import (
     normalize_search_text,
     search_recipes,
 )
+from .sync_storage import (
+    AnyListSyncStore,
+    async_create_client,
+    async_remove_sync_store,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -114,6 +118,7 @@ class AnyListRuntimeData:
     client: AnyListClient
     coordinator: DataUpdateCoordinator[dict[str, Any]]
     icalendar_url: str | None
+    sync_store: AnyListSyncStore | None = None
 
 
 _INGREDIENT_ONLY_FIELDS = (ATTR_QUANTITY, ATTR_NOTE, ATTR_RAW_INGREDIENT)
@@ -606,6 +611,11 @@ async def _async_fetch_data_stages(
     except AnyListTimeoutError as err:
         raise UpdateFailed("Timed out fetching AnyList lists") from err
     except Exception as err:
+        if isinstance(err, AnyListHTTPError) and err.status == 429:
+            raise UpdateFailed(
+                "AnyList syncing is temporarily paused by the server",
+                retry_after=err.retry_after or 3600,
+            ) from err
         if _is_auth_error(err):
             raise ConfigEntryAuthFailed("AnyList authentication failed") from err
         raise UpdateFailed(f"Error fetching AnyList lists: {err}") from err
@@ -622,6 +632,11 @@ async def _async_fetch_data_stages(
     except AnyListTimeoutError as err:
         raise UpdateFailed("Timed out fetching AnyList favourites") from err
     except Exception as err:
+        if isinstance(err, AnyListHTTPError) and err.status == 429:
+            raise UpdateFailed(
+                "AnyList syncing is temporarily paused by the server",
+                retry_after=err.retry_after or 3600,
+            ) from err
         if _is_auth_error(err):
             raise ConfigEntryAuthFailed("AnyList authentication failed") from err
         raise UpdateFailed(f"Error fetching AnyList favourites: {err}") from err
@@ -636,9 +651,11 @@ async def _async_fetch_data_stages(
 
 async def _async_refresh_entry(hass: HomeAssistant, entry_id: str) -> dict[str, Any]:
     """Refresh coordinator data for a loaded AnyList config entry."""
-    coordinator = _get_entry_runtime_data(hass, entry_id)[1].coordinator
+    runtime = _get_entry_runtime_data(hass, entry_id)[1]
+    coordinator = runtime.coordinator
     _LOGGER.debug("AnyList refresh started for config entry %s", entry_id)
     try:
+        await async_call_with_timeout(hass, runtime.client.request_refresh)
         await asyncio.wait_for(
             coordinator.async_refresh(),
             timeout=ANYLIST_REFRESH_TIMEOUT,
@@ -1201,13 +1218,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     password = entry.data[CONF_PASSWORD]
 
     try:
-        client = await async_call_with_timeout(
-            hass,
-            AnyListClient.login,
-            email,
-            password,
-            timeout=ANYLIST_LOGIN_TIMEOUT,
-        )
+        client, sync_store = await async_create_client(hass, email, password)
     except Exception as err:
         if _is_auth_error(err):
             raise ConfigEntryAuthFailed("AnyList authentication failed") from err
@@ -1259,6 +1270,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         client=client,
         coordinator=coordinator,
         icalendar_url=icalendar_url,
+        sync_store=sync_store,
     )
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
@@ -1332,6 +1344,16 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     platforms = get_platforms(entry)
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, platforms):
+        runtime = entry.runtime_data
+        runtime.client.close()
+        if runtime.sync_store is not None:
+            state = await hass.async_add_executor_job(runtime.client.export_sync_state)
+            await runtime.sync_store.async_save(state)
         entry.runtime_data = None
 
     return unload_ok
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Remove saved account data after the integration is deleted."""
+    await async_remove_sync_store(hass, entry.data[CONF_EMAIL])

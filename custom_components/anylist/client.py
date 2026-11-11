@@ -8,8 +8,11 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field, replace
+from email.utils import parsedate_to_datetime
+from functools import wraps
 import json
 import logging
+import math
 import re
 import socket
 import struct
@@ -64,10 +67,11 @@ class AnyListTimeoutError(AnyListError):
 class AnyListHTTPError(AnyListError):
     """Raised for non-successful HTTP responses."""
 
-    def __init__(self, status: int, message: str) -> None:
+    def __init__(self, status: int, message: str, *, retry_after: float | None = None) -> None:
         """Initialize the HTTP error."""
         super().__init__(message)
         self.status = status
+        self.retry_after = retry_after
 
 
 class AnyListNotFoundError(AnyListError):
@@ -1289,6 +1293,48 @@ def _scale_quantity(quantity: str, scale: float) -> str:
     return f"{scaled_text} {rest}" if rest else scaled_text
 
 
+def _serialized(method: Callable[..., _T]) -> Callable[..., _T]:
+    """Keep a read/modify/write operation atomic across executor threads."""
+    @wraps(method)
+    def serialized(self, *args, **kwargs):
+        """Serialize the operation and reject an active account cooldown."""
+        with self._sync.gate.lock:
+            self._sync.check()
+            return method(self, *args, **kwargs)
+
+    return serialized
+
+
+def _retry_after(headers: Any, body: str) -> float:
+    """Honor both rate-limit formats, using a conservative fallback if missing."""
+    values = []
+    try:
+        payload = json.loads(body)
+    except (ValueError, TypeError):
+        payload = {}
+    if isinstance(payload, dict):
+        value = payload.get("retry_after")
+        try:
+            if not isinstance(value, bool):
+                seconds = float(value)
+                if math.isfinite(seconds) and seconds >= 0:
+                    values.append(seconds)
+        except (TypeError, ValueError, OverflowError):
+            pass
+    header = headers.get("Retry-After") if headers is not None else None
+    if header is not None:
+        try:
+            seconds = float(header)
+        except (TypeError, ValueError, OverflowError):
+            try:
+                seconds = parsedate_to_datetime(header).timestamp() - time.time()
+            except (TypeError, ValueError, OverflowError):
+                seconds = math.nan
+        if math.isfinite(seconds):
+            values.append(max(0, seconds))
+    return max(1, max(values)) if values else 3600
+
+
 class AnyListClient:
     """Timeout-safe local AnyList client."""
 
@@ -1307,6 +1353,43 @@ class AnyListClient:
         self._user_id = user_id
         self._is_premium_user = is_premium_user
         self._client_identifier = client_identifier
+        self._closed = False
+        # Import after client.py is initialized so the wire helpers also remain
+        # usable by the protocol merger without importing Home Assistant.
+        from .sync import AnyListSync
+
+        self._sync = AnyListSync(self)
+
+    def configure_sync(self, state: dict, on_change: Callable, gate: Any) -> None:
+        """Attach account-scoped persistence and restore coherent raw snapshots."""
+        self._sync.gate = gate
+        self._sync.restore(state)
+        self._sync.on_change = on_change
+
+    def export_sync_state(self) -> dict:
+        """Return cached data and cursors without authentication credentials."""
+        return self._sync.export()
+
+    def sync_diagnostics(self) -> dict:
+        """Return aggregate request counts, cache sizes and cooldown status."""
+        return self._sync.diagnostics()
+
+    def close(self) -> None:
+        """Prevent queued executor work from starting requests after unload."""
+        self._closed = True
+
+    @_serialized
+    def request_refresh(self) -> None:
+        """Make the next read of each loaded resource revalidate its snapshot."""
+        for resource in self._sync.resources.values():
+            if resource.data is not None:
+                resource.dirty = True
+
+    def _read_resource(self, name: str, *, force_refresh: bool = False) -> bytes:
+        """Read one resource conditionally, keeping secondary reads cached."""
+        if force_refresh:
+            return self._sync.fetch(name, max_age=0)
+        return self._sync.fetch(name)
 
     @classmethod
     def login(cls, email: str, password: str) -> "AnyListClient":
@@ -1348,8 +1431,13 @@ class AnyListClient:
         return self._is_premium_user
 
     def get_lists(self) -> list[ShoppingList]:
-        """Get all shopping lists."""
-        return _parse_user_data_lists(self.get_user_data())
+        """Revalidate shopping lists without fetching recipes or favourites."""
+        lists = _parse_shopping_lists_response(
+            self._read_resource("lists", force_refresh=True)
+        )
+        if any(not shopping_list.sort_order_is_set for shopping_list in lists):
+            _apply_user_list_settings(lists, self._read_resource("settings"))
+        return lists
 
     def get_list_by_id(self, list_id: str) -> ShoppingList:
         """Get a shopping list by ID."""
@@ -1374,13 +1462,8 @@ class AnyListClient:
         ]
 
     def get_favourites_lists(self) -> list[FavouritesList]:
-        """Get all favourites lists."""
-        data = self.get_user_data()
-        fields = _parse_fields(data)
-        raw_response = _first_value(fields, 7)
-        if not isinstance(raw_response, bytes):
-            return []
-        return _parse_favourites_lists_response(raw_response)
+        """Get favourites from their own conditional, five-minute cache."""
+        return _parse_favourites_lists_response(self._read_resource("favourites"))
 
     def get_recipes(
         self,
@@ -1388,11 +1471,7 @@ class AnyListClient:
         collection_name: str | None = None,
     ) -> list[Recipe]:
         """Get recipes and memberships from one snapshot, optionally by collection."""
-        data = self.get_user_data()
-        fields = _parse_fields(data)
-        raw_response = _first_value(fields, 3)
-        if not isinstance(raw_response, bytes):
-            raw_response = b""
+        raw_response = self._read_resource("recipes")
         recipe_fields = _parse_fields(raw_response)
         recipes = _parse_recipes_response(raw_response)
         if collection_id is not None or collection_name is not None:
@@ -1429,6 +1508,7 @@ class AnyListClient:
             recipe_id, collection_id, collection_name, add=False
         )
 
+    @_serialized
     def _change_recipe_collection_membership(
         self,
         recipe_id: str,
@@ -1438,7 +1518,7 @@ class AnyListClient:
         add: bool,
     ) -> RecipeCollection:
         """Send the web client's membership delta, preserving collection metadata."""
-        fields = self._get_recipe_data_fields()
+        fields = self._get_recipe_data_fields(force_refresh=True)
         collection = select_recipe_collection(
             _parse_recipe_collections(fields), collection_id, collection_name
         )
@@ -1495,6 +1575,7 @@ class AnyListClient:
             list_id, name, None, None, None, None, at_top
         )
 
+    @_serialized
     def add_item_with_details(
         self,
         list_id: str,
@@ -1577,6 +1658,7 @@ class AnyListClient:
             at_top,
         )
 
+    @_serialized
     def create_category(
         self, list_id: str, category_set_id: str, name: str, sort_index: int
     ) -> ListCategory:
@@ -1617,6 +1699,7 @@ class AnyListClient:
         self.post("data/shopping-lists/update-v2", _pb_list_operation_list([operation]))
         return category
 
+    @_serialized
     def update_item_details(
         self,
         list_id: str,
@@ -1671,6 +1754,7 @@ class AnyListClient:
             ))
         return operations
 
+    @_serialized
     def update_item_category(
         self,
         list_id: str,
@@ -1726,8 +1810,8 @@ class AnyListClient:
 
     def _find_raw_list_item(self, list_id: str, item_id: str) -> bytes:
         """Read the authoritative item protobuf before preserving its metadata."""
-        response = _first_value(_parse_fields(self.get_user_data()), 1)
-        if isinstance(response, bytes):
+        response = self._read_resource("lists", force_refresh=True)
+        if response:
             fields = _parse_fields(response)
             for raw_list in _all_values(fields, 1) + _all_values(fields, 2):
                 if not isinstance(raw_list, bytes):
@@ -1745,6 +1829,7 @@ class AnyListClient:
             "The AnyList item was not found before changing its category"
         )
 
+    @_serialized
     def update_item(
         self,
         list_id: str,
@@ -1780,6 +1865,7 @@ class AnyListClient:
         )
         self.post("data/shopping-lists/update", _pb_list_operation_list([operation]))
 
+    @_serialized
     def rename_item(
         self, list_id: str, item_id: str, name: str, original_name: str | None = None
     ) -> None:
@@ -1794,6 +1880,7 @@ class AnyListClient:
         )
         self.post("data/shopping-lists/update", _pb_list_operation_list([operation]))
 
+    @_serialized
     def move_item(
         self, list_id: str, item_id: str, previous_item_id: str | None = None
     ) -> None:
@@ -1853,6 +1940,7 @@ class AnyListClient:
             _NEW_ITEM_POSITION_VALUES[position],
         )
 
+    @_serialized
     def _set_list_setting(
         self, list_id: str, handler_id: str, number: int, value: int
     ) -> None:
@@ -1877,6 +1965,7 @@ class AnyListClient:
         """Delete a list item."""
         self.bulk_delete_items(list_id, [item_id])
 
+    @_serialized
     def bulk_delete_items(self, list_id: str, item_ids: list[str]) -> None:
         """Delete multiple list items."""
         if not item_ids:
@@ -1896,6 +1985,7 @@ class AnyListClient:
         )
         self.post("data/shopping-lists/update", _pb_list_operation_list([operation]))
 
+    @_serialized
     def delete_all_crossed_off_items(self, list_id: str) -> None:
         """Delete all checked items from a list."""
         shopping_list = self.get_list_by_id(list_id)
@@ -1904,6 +1994,7 @@ class AnyListClient:
             [item.id for item in shopping_list.items if item.is_checked],
         )
 
+    @_serialized
     def create_recipe(
         self,
         name: str,
@@ -1928,7 +2019,7 @@ class AnyListClient:
             handler_id="save-recipe",
             user_id=self._user_id,
             recipe=recipe_payload,
-            recipe_data_id=self._recipe_data_id(self._get_recipe_data_fields()),
+            recipe_data_id=self._recipe_data_id(self._get_recipe_data_fields(force_refresh=True)),
         )
         self.post("data/user-recipe-data/update", _pb_recipe_operation_list([operation]))
         return Recipe(
@@ -1991,10 +2082,9 @@ class AnyListClient:
             "Timed out waiting for AnyList to process the recipe image"
         )
 
-    def _get_recipe_data_fields(self) -> dict[int, list[tuple[int, Any]]]:
+    def _get_recipe_data_fields(self, *, force_refresh: bool = False) -> dict[int, list[tuple[int, Any]]]:
         """Read the recipe collection metadata needed by recipe operations."""
-        raw = _first_value(_parse_fields(self.get_user_data()), 3)
-        return _parse_fields(raw) if isinstance(raw, bytes) else {}
+        return _parse_fields(self._read_resource("recipes", force_refresh=force_refresh))
 
     @staticmethod
     def _recipe_data_id(fields: dict[int, list[tuple[int, Any]]]) -> str:
@@ -2004,6 +2094,7 @@ class AnyListClient:
             raise AnyListError("AnyList did not return a recipe data ID")
         return recipe_data_id
 
+    @_serialized
     def update_recipe(
         self,
         recipe_id: str,
@@ -2017,7 +2108,7 @@ class AnyListClient:
         ``ingredients`` replaces the whole ingredient list, headings included.
         Supplied ingredient IDs are kept; missing or repeated IDs get new ones.
         """
-        fields = self._get_recipe_data_fields()
+        fields = self._get_recipe_data_fields(force_refresh=True)
         raw_recipe = self._find_raw_recipe(fields, recipe_id)
         # The web app edits a copy of the original PBRecipe. Preserve fields
         # outside this action's scope, including photos and creation metadata.
@@ -2041,9 +2132,10 @@ class AnyListClient:
         )
         self.post("data/user-recipe-data/update", _pb_recipe_operation_list([operation]))
 
+    @_serialized
     def delete_recipe(self, recipe_id: str) -> None:
         """Delete a recipe."""
-        fields = self._get_recipe_data_fields()
+        fields = self._get_recipe_data_fields(force_refresh=True)
         raw_recipe = self._find_raw_recipe(fields, recipe_id)
         operation = _pb_recipe_operation(
             handler_id="remove-recipe",
@@ -2071,6 +2163,7 @@ class AnyListClient:
             raise AnyListNotFoundError(f"AnyList recipe '{recipe_id}' was not found")
         return raw_recipe
 
+    @_serialized
     def add_recipe_to_list(
         self,
         recipe_id: str,
@@ -2078,7 +2171,10 @@ class AnyListClient:
         scale_factor: float | None = None,
     ) -> None:
         """Add a recipe's ingredients to a shopping list, skipping headings."""
-        recipe = self.get_recipe_by_id(recipe_id)
+        recipe_fields = self._get_recipe_data_fields(force_refresh=True)
+        recipe = _parse_recipe(self._find_raw_recipe(recipe_fields, recipe_id))
+        if recipe is None:
+            raise AnyListError("AnyList returned an invalid recipe")
         at_top = any(
             shopping_list.id == list_id and inserts_new_items_at_top(shopping_list)
             for shopping_list in self.get_lists()
@@ -2141,6 +2237,7 @@ class AnyListClient:
         """Post an AnyList operations request."""
         return self.post_multipart(f"/{endpoint}", "operations", body)
 
+    @_serialized
     def post_multipart(
         self,
         endpoint: str,
@@ -2148,17 +2245,29 @@ class AnyListClient:
         body: bytes | None = None,
         *,
         fields: dict[str, str] | None = None,
+        files: dict[str, bytes] | None = None,
     ) -> bytes:
-        """Post an authenticated multipart request with token refresh."""
+        """Guard multipart reads/writes, including multi-part timestamp requests."""
+        self._sync.invalidate(endpoint)
+        kwargs: dict[str, Any] = {"fields": fields}
+        if files is not None:
+            kwargs["files"] = files
+
+        def send() -> bytes:
+            """Send one attempt through the account's cooldown and counters."""
+            return self._sync.request(
+                lambda: self._authenticated_multipart(endpoint, field_name, body, **kwargs)
+            )
+
         try:
-            return self._authenticated_multipart(endpoint, field_name, body, fields=fields)
+            return send()
         except AnyListHTTPError as err:
             if err.status != 401:
                 raise
 
         _LOGGER.debug("Refreshing AnyList access token after authorization failure")
         self._refresh_tokens()
-        return self._authenticated_multipart(endpoint, field_name, body, fields=fields)
+        return send()
 
     def _set_item_checked(self, list_id: str, item_id: str, checked: bool) -> None:
         """Set a list item's checked state."""
@@ -2178,7 +2287,7 @@ class AnyListClient:
         req = request.Request(
             f"{_API_BASE_URL}{endpoint}", headers=headers, method="GET"
         )
-        return self._request(req, timeout=ANYLIST_REQUEST_TIMEOUT)
+        return self._sync.request(lambda: self._request(req, timeout=ANYLIST_REQUEST_TIMEOUT))
 
     def _authenticated_multipart(
         self,
@@ -2187,17 +2296,17 @@ class AnyListClient:
         body: bytes | None,
         *,
         fields: dict[str, str] | None = None,
+        files: dict[str, bytes] | None = None,
     ) -> bytes:
         """Send an authenticated multipart request."""
         headers = self._base_headers(self._client_identifier)
         headers["Authorization"] = f"Bearer {self._access_token}"
+        request_files = dict(files or {})
+        if field_name is not None and body is not None:
+            request_files[field_name] = body
         return self._request_multipart(
             endpoint,
-            files=(
-                {field_name: body}
-                if field_name is not None and body is not None
-                else None
-            ),
+            files=request_files or None,
             fields=fields,
             headers=headers,
             timeout=ANYLIST_REQUEST_TIMEOUT,
@@ -2206,11 +2315,13 @@ class AnyListClient:
     def _refresh_tokens(self) -> None:
         """Refresh access and refresh tokens."""
         try:
-            response = self._request_multipart(
-                "/auth/token/refresh",
-                fields={"refresh_token": self._refresh_token},
-                headers=self._base_headers(self._client_identifier),
-                timeout=ANYLIST_REQUEST_TIMEOUT,
+            response = self._sync.request(
+                lambda: self._request_multipart(
+                    "/auth/token/refresh",
+                    fields={"refresh_token": self._refresh_token},
+                    headers=self._base_headers(self._client_identifier),
+                    timeout=ANYLIST_REQUEST_TIMEOUT,
+                )
             )
             payload = json.loads(response.decode("utf-8"))
             self._access_token = payload["access_token"]
@@ -2266,6 +2377,7 @@ class AnyListClient:
             raise AnyListHTTPError(
                 err.code,
                 f"AnyList request failed with HTTP {err.code}: {body_text}",
+                retry_after=_retry_after(err.headers, body_text) if err.code == 429 else None,
             ) from err
         except urlerror.URLError as err:
             if isinstance(err.reason, (socket.timeout, TimeoutError)):

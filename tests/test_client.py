@@ -12,16 +12,26 @@ import pytest
 
 from custom_components.anylist import client as client_module
 
+from .conftest import stub_snapshot_reads
+
 
 def _client() -> client_module.AnyListClient:
-    """Return an authenticated client."""
-    return client_module.AnyListClient(
+    """Stub snapshot reads for the existing parser and operation payload tests.
+
+    Conditional HTTP and cache behavior is covered with an unstubbed client in
+    test_conditional_sync.py. These tests continue supplying their synthetic
+    PBUserDataResponse through get_user_data, without using the live endpoint.
+    """
+    client = client_module.AnyListClient(
         access_token="access",
         refresh_token="refresh",
         user_id="user-1",
         is_premium_user=True,
         client_identifier="client-1",
     )
+
+    stub_snapshot_reads(client)
+    return client
 
 
 def _shopping_user_data() -> bytes:

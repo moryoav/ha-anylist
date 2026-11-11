@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.12.1 - 2026-11-11
+
+- Replace repeated full-account downloads with conditional shopping-list,
+  recipe, favourite, and settings requests. Keep the 60-second shopping-list
+  polling default and merge incremental changes without losing unchanged data.
+- Cache recipes and favourites separately for up to five minutes and reuse
+  recipe data between searches and detail reads. Revalidate item changes
+  immediately and refresh secondary caches on the next read after
+  `anylist.refresh`.
+- Honour AnyList's HTTP 429 retry delay across polling, actions, and setup.
+  Save cooldowns and coherent snapshots across reloads and restarts, and expose
+  request counts and cache status in diagnostics.
+
 ## 0.12.0 - 2026-11-02
 
 - Return recipe ingredient headings in place in the `ingredients` of

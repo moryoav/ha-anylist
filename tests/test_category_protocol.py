@@ -13,16 +13,20 @@ import pytest
 from custom_components.anylist import client as api
 from custom_components.anylist.category_catalog import serialize_categories
 
+from .conftest import stub_snapshot_reads
+
 
 def authenticated_client() -> api.AnyListClient:
     """Create a protocol client without performing real authentication."""
-    return api.AnyListClient(
+    client = api.AnyListClient(
         access_token="token",
         refresh_token="refresh",
         user_id="user-a",
         is_premium_user=True,
         client_identifier="test-client",
     )
+    stub_snapshot_reads(client)
+    return client
 
 
 def raw_assignment(identifier: str, group: str, category: str) -> bytes:

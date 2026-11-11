@@ -29,7 +29,6 @@ from .client import (
 )
 from .const import (
     ANYLIST_DEFAULT_POLL_INTERVAL,
-    ANYLIST_LOGIN_TIMEOUT,
     ANYLIST_MAX_POLL_INTERVAL,
     ANYLIST_MIN_POLL_INTERVAL,
     ANYLIST_REQUEST_TIMEOUT,
@@ -38,6 +37,7 @@ from .const import (
     CONF_SELECTED_LISTS,
     DOMAIN,
 )
+from .sync_storage import async_create_client
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -91,13 +91,7 @@ async def _async_validate_credentials(
 ) -> tuple[str, AnyListClient, list[tuple[str, str]]]:
     """Validate credentials and return account information."""
     try:
-        client = await async_call_with_timeout(
-            hass,
-            AnyListClient.login,
-            email,
-            password,
-            timeout=ANYLIST_LOGIN_TIMEOUT,
-        )
+        client, _ = await async_create_client(hass, email, password)
         lists = await async_call_with_timeout(
             hass,
             client.get_lists,

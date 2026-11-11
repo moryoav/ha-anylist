@@ -75,6 +75,7 @@ async def async_get_config_entry_diagnostics(
                 runtime_data.icalendar_url if runtime_data is not None else None
             ),
             "poll_interval": get_poll_interval(entry),
+            "sync": runtime_data.client.sync_diagnostics() if runtime_data is not None else {},
         },
     }
 

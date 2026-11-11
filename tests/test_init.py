@@ -1,7 +1,11 @@
 """Tests for AnyList integration initialization."""
 import importlib.util
+import importlib
+from pathlib import Path
 import sys
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
+
+from .conftest import stub_snapshot_reads
 
 
 def test_const_values():
@@ -35,14 +39,13 @@ def test_const_values():
 
 
 def _load_client_module():
-    """Load client.py directly to avoid homeassistant dependency."""
-    spec = importlib.util.spec_from_file_location(
-        "client", "custom_components/anylist/client.py"
-    )
-    client = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = client
-    spec.loader.exec_module(client)
-    return client
+    """Load the client package without executing the HA integration initializer."""
+    name = "_anylist_standalone_test"
+    if name not in sys.modules:
+        package = ModuleType(name)
+        package.__path__ = [str(Path("custom_components/anylist").resolve())]
+        sys.modules[name] = package
+    return importlib.import_module(f"{name}.client")
 
 
 def _load_category_module():
@@ -116,6 +119,7 @@ def test_local_client_parses_shopping_list_response():
         is_premium_user=False,
         client_identifier="client1",
     )
+    stub_snapshot_reads(client)
     client.get_user_data = lambda: user_data
 
     lists = client.get_lists()
@@ -351,6 +355,7 @@ def test_local_client_parses_category_assignments():
         is_premium_user=False,
         client_identifier="client1",
     )
+    stub_snapshot_reads(client)
     client.get_user_data = lambda: user_data
 
     lists = client.get_lists()
