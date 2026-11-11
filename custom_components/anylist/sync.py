@@ -202,8 +202,6 @@ def merge_lists(old: bytes, incoming: bytes) -> bytes:
         metadata.pop(identifier, None)
     for raw in _messages(new, 1) + _messages(new, 2):
         identifier = _identifier(raw)
-        if not _first_string(_parse_fields(raw), 3):
-            raise AnyListError("Missing AnyList shopping list name")
         old_clock = _double(_parse_fields(lists.get(identifier, b"")), 2) or 0
         new_clock = _double(_parse_fields(raw), 2)
         if new_clock is not None and new_clock < old_clock:

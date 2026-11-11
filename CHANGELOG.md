@@ -18,6 +18,8 @@
   prevent queued actions from starting after their timeout.
 - Recover rejected incremental updates with one full fetch of the affected
   resource instead of retaining unusable cursors across polls and restarts.
+- Retain timestamps for unnamed lists while skipping them from visible lists,
+  so they cannot interrupt syncing or cause repeated full downloads.
 
 ## 0.12.0 - 2026-11-02
 

@@ -33,6 +33,8 @@ Both cursor types are needed. Omitting logical timestamps can cause unchanged
 categories, stores, and categorization rules to be sent again. The client also
 retains cursors for lists that are not selected as Home Assistant entities:
 omitting a list tells the server that it is missing from the client cache.
+Records without a list name retain their cursors but are skipped by the list
+parser until a later update supplies a name.
 
 HTTP 304 is a successful no-change result when a complete snapshot is already
 cached. A 304 without a prior snapshot is an error. A partial response is merged

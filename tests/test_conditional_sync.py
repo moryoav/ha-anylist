@@ -260,6 +260,46 @@ def test_minute_polls_fetch_only_lists_and_reuse_favourites(monkeypatch):
     assert not server.responses
 
 
+@pytest.mark.parametrize("name_present", [False, True])
+def test_unnamed_list_retains_its_cursor_without_breaking_other_lists(
+    monkeypatch, name_present
+):
+    """Hidden nameless records must not cause repeated full downloads."""
+    unnamed = wire._preserve_message_fields(raw_list("unnamed", items=[]), {3})
+    if name_present:
+        unnamed += wire._field_string(3, "")
+    server = HttpQueue(
+        monkeypatch,
+        [
+            (
+                "/data/shopping-lists/all",
+                200,
+                initial_lists() + wire._field_message(1, unnamed),
+            ),
+            ("/data/shopping-lists/all", 304, b""),
+            ("/data/shopping-lists/all", 304, b""),
+            (
+                "/data/shopping-lists/all",
+                200,
+                wire._field_message(2, raw_list("unnamed", name="Named", timestamp=2)),
+            ),
+        ],
+    )
+    client = real_client()
+    assert [value.id for value in client.get_lists()] == ["groceries", "hardware"]
+    assert len(client.get_lists()) == 2
+    restored = real_client()
+    restored._sync.restore(client.export_sync_state())
+    assert len(restored.get_lists()) == 2
+    for _, parts in server.calls[1:3]:
+        cursors = wire._all_values(wire._parse_fields(parts["timestamps"]), 1)
+        assert "unnamed" in {
+            wire._first_string(wire._parse_fields(value), 1) for value in cursors
+        }
+    assert restored.get_lists()[-1].name == "Named"
+    assert not server.responses
+
+
 def test_modified_list_retains_other_lists_and_unchanged_categories(monkeypatch):
     """A partial item response cannot erase metadata or other shopping lists."""
     modified = wire._field_message(
